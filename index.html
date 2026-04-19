@@ -16,6 +16,8 @@
     --accent-hover: #1d4ed8;
     --surface: #fff;
     --danger: #dc2626;
+    --success: #16a34a;
+    --warning: #ca8a04;
   }
   html, body {
     height: 100%;
@@ -35,26 +37,44 @@
     position: relative;
   }
 
-  /* Header */
   .header {
-    padding: 16px 20px 12px;
+    padding: 14px 20px 10px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     z-index: 10;
     flex-shrink: 0;
   }
   .header h1 {
-    font-size: 20px;
+    font-size: 19px;
     font-weight: 600;
     letter-spacing: -0.3px;
   }
   .header .subtitle {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
     margin-top: 2px;
   }
+  .header .sync-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: #f0fdf4;
+    color: var(--success);
+    margin-left: 8px;
+    font-weight: 500;
+  }
+  .header .sync-badge.offline {
+    background: #fef2f2;
+    color: var(--danger);
+  }
+  .header .sync-badge.pending {
+    background: #fefce8;
+    color: var(--warning);
+  }
 
-  /* Content area */
   .content {
     flex: 1;
     overflow-y: auto;
@@ -68,10 +88,18 @@
   }
   .page.active { display: block; }
 
-  /* Write page */
+  /* Write */
+  .write-meta {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
   .write-area {
     width: 100%;
-    min-height: 60vh;
+    min-height: 55vh;
     border: none;
     outline: none;
     font-size: 17px;
@@ -81,17 +109,15 @@
     color: var(--text);
     background: transparent;
   }
-  .write-area::placeholder {
-    color: #ccc;
-  }
+  .write-area::placeholder { color: #ccc; }
 
-  /* Save button */
+  /* Save bar */
   .save-bar {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 20px calc(10px + env(safe-area-inset-bottom));
     background: var(--surface);
     border-top: 1px solid var(--border);
     display: flex;
@@ -106,11 +132,8 @@
     font-size: 13px;
     color: var(--text-secondary);
   }
-  .save-bar .status.offline {
-    color: var(--danger);
-  }
   .btn {
-    padding: 10px 24px;
+    padding: 10px 22px;
     border: none;
     border-radius: 8px;
     font-size: 15px;
@@ -136,8 +159,12 @@
     background: #fee2e2;
     color: var(--danger);
   }
+  .btn-small {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
 
-  /* List page */
+  /* List */
   .diary-list {
     list-style: none;
     padding-bottom: 80px;
@@ -182,7 +209,7 @@
     opacity: 0.3;
   }
 
-  /* Detail page */
+  /* Detail */
   .detail-body {
     font-size: 16px;
     line-height: 1.8;
@@ -199,10 +226,7 @@
     color: var(--accent);
     margin: 20px 0 8px;
   }
-  .detail-body p {
-    margin-bottom: 12px;
-  }
-  .detail-body br { display: block; content: ""; margin: 4px 0; }
+  .detail-body p { margin-bottom: 12px; }
   .back-link {
     display: inline-flex;
     align-items: center;
@@ -213,9 +237,9 @@
     margin-bottom: 16px;
   }
 
-  /* Settings page */
+  /* Settings */
   .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 18px;
   }
   .form-group label {
     display: block;
@@ -224,7 +248,7 @@
     margin-bottom: 6px;
     color: var(--text);
   }
-  .form-group input {
+  .form-group input, .form-group textarea {
     width: 100%;
     padding: 12px 14px;
     border: 1px solid var(--border);
@@ -234,10 +258,16 @@
     background: var(--bg);
     -webkit-appearance: none;
   }
-  .form-group input:focus {
+  .form-group input:focus, .form-group textarea:focus {
     outline: none;
     border-color: var(--accent);
     background: var(--surface);
+  }
+  .form-group textarea {
+    min-height: 80px;
+    resize: vertical;
+    font-size: 13px;
+    font-family: monospace;
   }
   .hint {
     font-size: 12px;
@@ -245,14 +275,29 @@
     margin-top: 4px;
     line-height: 1.4;
   }
+  .hint.code {
+    background: #f5f5f5;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    word-break: break-all;
+  }
   .settings-actions {
-    margin-top: 32px;
+    margin-top: 24px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
   .settings-actions .btn {
     width: 100%;
+  }
+  .settings-row {
+    display: flex;
+    gap: 10px;
+  }
+  .settings-row .btn {
+    flex: 1;
   }
 
   /* Nav */
@@ -291,7 +336,6 @@
     height: 22px;
   }
 
-  /* Toast */
   .toast {
     position: fixed;
     top: 20px;
@@ -312,8 +356,6 @@
     transform: translateX(-50%) translateY(0);
     opacity: 1;
   }
-
-  /* Spinner */
   .spinner {
     display: inline-block;
     width: 16px;
@@ -327,25 +369,34 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Hide save-bar when detail page is shown (detail has its own layout) */
   .page-detail ~ .save-bar { display: none; }
 </style>
 </head>
 <body>
 <div id="app">
   <div class="header" id="header">
-    <h1 id="pageTitle">极简日记</h1>
-    <div class="subtitle" id="pageSubtitle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <h1 id="pageTitle">极简日记</h1>
+        <div class="subtitle" id="pageSubtitle"></div>
+      </div>
+      <span class="sync-badge" id="syncBadge" style="display:none;"></span>
+    </div>
   </div>
 
   <div class="content" id="content">
     <!-- Write -->
     <div class="page active" id="page-write">
+      <div class="write-meta">
+        <span id="writeDate"></span>
+        <span style="font-size:11px;color:#bbb;">自动保存到 GitHub</span>
+      </div>
       <textarea class="write-area" id="writeArea" placeholder="今天发生了什么..."></textarea>
     </div>
 
     <!-- List -->
     <div class="page" id="page-list">
+      <div id="listStatus" style="font-size:12px;color:#888;margin-bottom:10px;"></div>
       <ul class="diary-list" id="diaryList"></ul>
       <div class="empty-state" id="listEmpty" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -365,35 +416,50 @@
       <div class="form-group">
         <label>GitHub Token</label>
         <input type="password" id="settingToken" placeholder="ghp_xxxx 或 github_pat_xxxx" autocomplete="off">
-        <div class="hint">Fine-grained PAT 需勾选 Contents 读写权限。Token 仅保存在本地浏览器。</div>
+        <div class="hint">Fine-grained PAT 需勾选 Contents 读写权限，并授权本仓库。</div>
       </div>
       <div class="form-group">
-        <label>用户名 (GitHub Username)</label>
-        <input type="text" id="settingOwner" placeholder="例如：doudians" autocomplete="off">
+        <label>用户名</label>
+        <input type="text" id="settingOwner" placeholder="doudians" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>仓库名 (Repository)</label>
-        <input type="text" id="settingRepo" placeholder="例如：diary" autocomplete="off">
-        <div class="hint">仓库需提前创建，或填写新仓库名（保存时会自动检测并引导创建）。</div>
+        <label>仓库名</label>
+        <input type="text" id="settingRepo" placeholder="diary" autocomplete="off">
+        <div class="hint"> diary 目录下的 Markdown 文件即为日记数据。</div>
       </div>
+
+      <div class="settings-row">
+        <button class="btn btn-secondary btn-small" id="btnTest">测试连接</button>
+        <button class="btn btn-secondary btn-small" id="btnExport">导出配置</button>
+        <button class="btn btn-secondary btn-small" id="btnImport">导入配置</button>
+      </div>
+
+      <div class="form-group" id="importBox" style="display:none;margin-top:12px;">
+        <label>粘贴配置字符串</label>
+        <textarea id="importText" placeholder="粘贴之前导出的配置字符串"></textarea>
+        <button class="btn btn-primary btn-small" id="btnDoImport" style="margin-top:6px;">确认导入</button>
+      </div>
+
+      <div class="form-group" id="exportBox" style="display:none;margin-top:12px;">
+        <label>配置字符串（复制保存到备忘录）</label>
+        <div class="hint code" id="exportText"></div>
+      </div>
+
       <div class="settings-actions">
         <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
-        <button class="btn btn-secondary" id="btnTestConnection">测试连接</button>
         <button class="btn btn-danger" id="btnClearData">清除本地数据</button>
       </div>
     </div>
   </div>
 
-  <!-- Save bar (write page only) -->
   <div class="save-bar" id="saveBar">
     <span class="status" id="saveStatus">准备就绪</span>
     <button class="btn btn-primary" id="btnSave">
       <span id="saveSpinner" style="display:none;"><span class="spinner"></span></span>
-      <span id="saveText">保存</span>
+      <span id="saveText">保存到云端</span>
     </button>
   </div>
 
-  <!-- Bottom nav -->
   <div class="nav" id="nav">
     <button class="nav-item active" data-page="write">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -416,14 +482,14 @@
 (function() {
   'use strict';
 
-  const LS_KEY = 'minidiary_config';
+  const LS_KEY = 'minidiary_config_v2';
   const DIARY_DIR = 'diary';
+  const DEFAULT_OWNER = 'doudians';
+  const DEFAULT_REPO = 'diary';
 
   const $ = id => document.getElementById(id);
-  const fmtDate = d => {
-    const w = ['周日','周一','周二','周三','周四','周五','周六'];
-    return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${w[d.getDay()]}`;
-  };
+  const w = ['周日','周一','周二','周三','周四','周五','周六'];
+  const fmtDate = d => `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${w[d.getDay()]}`;
   const fmtDateShort = d => `${d.getMonth()+1}月${d.getDate()}日`;
   const fmtFileDate = d => {
     const y = d.getFullYear();
@@ -447,8 +513,11 @@
     } catch(e) { config = null; }
     if (config) {
       $('settingToken').value = config.token || '';
-      $('settingOwner').value = config.owner || '';
-      $('settingRepo').value = config.repo || '';
+      $('settingOwner').value = config.owner || DEFAULT_OWNER;
+      $('settingRepo').value = config.repo || DEFAULT_REPO;
+    } else {
+      $('settingOwner').value = DEFAULT_OWNER;
+      $('settingRepo').value = DEFAULT_REPO;
     }
     return !!config;
   }
@@ -456,8 +525,8 @@
   function saveConfig() {
     config = {
       token: $('settingToken').value.trim(),
-      owner: $('settingOwner').value.trim(),
-      repo: $('settingRepo').value.trim()
+      owner: $('settingOwner').value.trim() || DEFAULT_OWNER,
+      repo: $('settingRepo').value.trim() || DEFAULT_REPO
     };
     localStorage.setItem(LS_KEY, JSON.stringify(config));
   }
@@ -466,8 +535,8 @@
     localStorage.removeItem(LS_KEY);
     config = null;
     $('settingToken').value = '';
-    $('settingOwner').value = '';
-    $('settingRepo').value = '';
+    $('settingOwner').value = DEFAULT_OWNER;
+    $('settingRepo').value = DEFAULT_REPO;
     showToast('本地数据已清除');
   }
 
@@ -478,23 +547,35 @@
     setTimeout(() => t.classList.remove('show'), 2500);
   }
 
+  function setSyncBadge(status, text) {
+    const b = $('syncBadge');
+    b.style.display = 'inline-flex';
+    b.textContent = text;
+    b.className = 'sync-badge' + (status ? ' ' + status : '');
+  }
+  function hideSyncBadge() {
+    $('syncBadge').style.display = 'none';
+  }
+
   function setSaveState(saving) {
     $('btnSave').disabled = saving || !isOnline;
     $('saveSpinner').style.display = saving ? 'inline' : 'none';
-    $('saveText').textContent = saving ? '保存中' : '保存';
+    $('saveText').textContent = saving ? '保存中' : '保存到云端';
   }
 
   function updateOnlineStatus() {
     isOnline = navigator.onLine;
     const st = $('saveStatus');
     if (!isOnline) {
-      st.textContent = '请连接网络后自动保存';
-      st.classList.add('offline');
+      st.textContent = '离线模式 — 请连接网络';
+      st.style.color = 'var(--danger)';
       $('btnSave').disabled = true;
+      setSyncBadge('offline', '离线');
     } else {
       st.textContent = '准备就绪';
-      st.classList.remove('offline');
+      st.style.color = '';
       $('btnSave').disabled = false;
+      hideSyncBadge();
     }
   }
 
@@ -513,7 +594,10 @@
   async function apiGet(path) {
     const res = await fetch(getApiBase() + path, { headers: getHeaders() });
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`HTTP ${res.status}: ${txt}`);
+    }
     return res.json();
   }
 
@@ -530,61 +614,85 @@
     return res.json();
   }
 
+  // Modern UTF-8 safe base64
   function utf8ToBase64(str) {
-    return btoa(unescape(encodeURIComponent(str)));
+    const bytes = new TextEncoder().encode(str);
+    const bin = Array.from(bytes, b => String.fromCharCode(b)).join('');
+    return btoa(bin);
   }
   function base64ToUtf8(str) {
-    return decodeURIComponent(escape(atob(str)));
+    const clean = str.replace(/\s/g, '');
+    const bin = atob(clean);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  async function ensureDiaryDir() {
+    // GitHub creates directories implicitly via file paths, but let's verify repo exists
+    const repo = await apiGet('');
+    if (!repo || !repo.id) throw new Error('仓库不存在或 Token 无权访问');
   }
 
   async function saveDiary() {
     const text = $('writeArea').value.trim();
     if (!text) { showToast('内容不能为空'); return; }
-    if (!config) { showToast('请先完成设置'); switchPage('settings'); return; }
+    if (!config || !config.token) { showToast('请先完成设置'); switchPage('settings'); return; }
 
     setSaveState(true);
+    setSyncBadge('pending', '同步中...');
     const fileName = `${fmtFileDate(currentDate)}.md`;
     const path = `/${DIARY_DIR}/${fileName}`;
     const timeStr = fmtTime(new Date());
     const newEntry = `## ${timeStr}\n${text}\n\n`;
 
     try {
+      await ensureDiaryDir();
       let content = `# ${fmtFileDate(currentDate)}\n\n${newEntry}`;
       let sha = null;
       const existing = await apiGet(`/contents${path}`);
       if (existing && existing.content) {
         sha = existing.sha;
-        const existingText = base64ToUtf8(existing.content.replace(/\s/g, ''));
+        const existingText = base64ToUtf8(existing.content);
         content = existingText.trimEnd() + '\n\n' + newEntry;
       }
 
       await apiPut(`/contents${path}`, {
         message: `diary: ${fileName}`,
         content: utf8ToBase64(content),
-        sha: sha || undefined
+        ...(sha ? { sha } : {})
       });
 
       $('writeArea').value = '';
-      showToast('保存成功');
+      showToast('已保存到 GitHub');
+      setSyncBadge('', '已同步');
+      setTimeout(hideSyncBadge, 3000);
     } catch (err) {
       console.error(err);
-      showToast('保存失败: ' + (err.message || '未知错误'));
+      let msg = err.message || '未知错误';
+      if (msg.includes('401')) msg = 'Token 无效或已过期';
+      else if (msg.includes('403')) msg = 'Token 无权限（请检查是否授权本仓库 Contents 读写）';
+      else if (msg.includes('404')) msg = '仓库不存在';
+      else if (msg.includes('422')) msg = '请求格式错误';
+      showToast('保存失败: ' + msg);
+      setSyncBadge('offline', '同步失败');
     } finally {
       setSaveState(false);
     }
   }
 
   async function loadDiaryList() {
-    if (!config) { showToast('请先完成设置'); switchPage('settings'); return; }
+    if (!config || !config.token) { showToast('请先完成设置'); switchPage('settings'); return; }
 
-    $('diaryList').innerHTML = '<li class="empty-state"><span style="color:#888;">加载中...</span></li>';
+    $('diaryList').innerHTML = '';
     $('listEmpty').style.display = 'none';
+    $('listStatus').textContent = '正在从 GitHub 加载...';
 
     try {
       const files = await apiGet(`/contents/${DIARY_DIR}`);
       if (!files || !Array.isArray(files) || files.length === 0) {
-        $('diaryList').innerHTML = '';
         $('listEmpty').style.display = 'block';
+        $('listStatus').textContent = '';
         return;
       }
 
@@ -593,12 +701,12 @@
         .sort((a, b) => b.name.localeCompare(a.name));
 
       if (mdFiles.length === 0) {
-        $('diaryList').innerHTML = '';
         $('listEmpty').style.display = 'block';
+        $('listStatus').textContent = '';
         return;
       }
 
-      $('diaryList').innerHTML = '';
+      $('listStatus').textContent = `共 ${mdFiles.length} 篇日记（来自 GitHub）`;
       for (const f of mdFiles) {
         const dateMatch = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
         let dateLabel = f.name.replace('.md','');
@@ -606,7 +714,6 @@
         if (dateMatch) {
           const d = new Date(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3]);
           dateLabel = fmtDateShort(d);
-          const w = ['周日','周一','周二','周三','周四','周五','周六'];
           wday = w[d.getDay()];
         }
 
@@ -614,7 +721,7 @@
         try {
           const detail = await apiGet(`/contents/${DIARY_DIR}/${f.name}`);
           if (detail && detail.content) {
-            const full = base64ToUtf8(detail.content.replace(/\s/g, ''));
+            const full = base64ToUtf8(detail.content);
             preview = full.replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}\s*/g, ' ').trim();
             preview = preview.slice(0, 60).replace(/\n/g, ' ') + (preview.length > 60 ? '...' : '');
           }
@@ -630,7 +737,10 @@
       console.error(err);
       $('diaryList').innerHTML = '';
       $('listEmpty').style.display = 'block';
-      showToast('加载失败: ' + err.message);
+      $('listStatus').textContent = '加载失败';
+      let msg = err.message || '';
+      if (msg.includes('404')) msg = '目录不存在，请先写一篇日记';
+      showToast('加载失败: ' + msg);
     }
   }
 
@@ -639,7 +749,7 @@
     try {
       const detail = await apiGet(`/contents/${DIARY_DIR}/${fileName}`);
       if (!detail || !detail.content) { showToast('读取失败'); return; }
-      const md = base64ToUtf8(detail.content.replace(/\s/g, ''));
+      const md = base64ToUtf8(detail.content);
       $('detailBody').innerHTML = marked.parse(md);
       switchPage('detail');
     } catch (err) {
@@ -668,6 +778,7 @@
     if (page === 'write') {
       $('saveBar').style.display = 'flex';
       $('nav').style.display = 'flex';
+      $('writeDate').textContent = fmtDate(currentDate);
       setTimeout(() => $('writeArea').focus(), 100);
     } else if (page === 'detail') {
       $('saveBar').style.display = 'none';
@@ -682,23 +793,71 @@
 
   async function testConnection() {
     const token = $('settingToken').value.trim();
-    const owner = $('settingOwner').value.trim();
-    const repo = $('settingRepo').value.trim();
-    if (!token || !owner || !repo) { showToast('请填写完整信息'); return; }
+    const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
+    const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
+    if (!token) { showToast('请填写 Token'); return; }
 
     const tmp = config;
     config = { token, owner, repo };
     try {
-      const res = await apiGet('');
-      if (res && res.id) {
-        showToast(`连接成功: ${res.full_name}`);
-      } else {
-        showToast('连接失败: 未找到仓库');
+      await ensureDiaryDir();
+      // Try to write a test file then delete it
+      const testPath = '/diary/.diary-test';
+      const testContent = 'test';
+      const putRes = await apiPut(`/contents${testPath}`, {
+        message: 'diary: test connection',
+        content: utf8ToBase64(testContent)
+      });
+      if (putRes && putRes.content && putRes.content.sha) {
+        await fetch(getApiBase() + `/contents${testPath}`, {
+          method: 'DELETE',
+          headers: getHeaders(),
+          body: JSON.stringify({ message: 'diary: cleanup test', sha: putRes.content.sha })
+        });
       }
+      showToast('连接成功 — 读写权限正常');
     } catch (err) {
-      showToast('连接失败: ' + err.message);
+      let msg = err.message || '';
+      if (msg.includes('401')) msg = 'Token 无效';
+      else if (msg.includes('403')) msg = 'Token 无权限，请检查是否授权本仓库 Contents 读写';
+      else if (msg.includes('404')) msg = '仓库不存在';
+      showToast('连接失败: ' + msg);
     }
     config = tmp;
+  }
+
+  function exportConfig() {
+    const token = $('settingToken').value.trim();
+    const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
+    const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
+    if (!token) { showToast('请先填写 Token'); return; }
+    const payload = utf8ToBase64(JSON.stringify({ token, owner, repo, v: 2 }));
+    $('exportText').textContent = payload;
+    $('exportBox').style.display = 'block';
+    $('importBox').style.display = 'none';
+    showToast('请复制上方字符串保存到备忘录');
+  }
+
+  function importConfig() {
+    $('importBox').style.display = 'block';
+    $('exportBox').style.display = 'none';
+  }
+
+  function doImport() {
+    const text = $('importText').value.trim();
+    if (!text) { showToast('请输入配置字符串'); return; }
+    try {
+      const cfg = JSON.parse(base64ToUtf8(text));
+      if (!cfg.token) throw new Error('无效配置');
+      $('settingToken').value = cfg.token;
+      $('settingOwner').value = cfg.owner || DEFAULT_OWNER;
+      $('settingRepo').value = cfg.repo || DEFAULT_REPO;
+      saveConfig();
+      showToast('配置已导入并保存');
+      $('importBox').style.display = 'none';
+    } catch(e) {
+      showToast('导入失败: 字符串无效');
+    }
   }
 
   // Events
@@ -708,7 +867,10 @@
     showToast('设置已保存');
     switchPage('write');
   });
-  $('btnTestConnection').addEventListener('click', testConnection);
+  $('btnTest').addEventListener('click', testConnection);
+  $('btnExport').addEventListener('click', exportConfig);
+  $('btnImport').addEventListener('click', importConfig);
+  $('btnDoImport').addEventListener('click', doImport);
   $('btnClearData').addEventListener('click', () => {
     if (confirm('确定要清除所有本地保存的 Token 和设置吗？')) {
       clearConfig();
@@ -727,7 +889,7 @@
   // Init
   updateOnlineStatus();
   const hasConfig = loadConfig();
-  if (hasConfig) {
+  if (hasConfig && config && config.token) {
     switchPage('write');
   } else {
     switchPage('settings');
