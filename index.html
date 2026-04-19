@@ -513,6 +513,7 @@
   let config = null;
   let currentDate = new Date();
   let isOnline = navigator.onLine;
+  let diaryCache = []; // in-memory cache for instant list updates
 
   function applyHashConfig() {
     const hash = location.hash;
@@ -691,6 +692,20 @@
         ...(sha ? { sha } : {})
       });
 
+      // Update cache so list shows instantly without re-fetching
+      const cacheEntry = {
+        name: fileName,
+        dateLabel: fmtDateShort(currentDate),
+        weekday: w[currentDate.getDay()],
+        preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '')
+      };
+      const existingIndex = diaryCache.findIndex(d => d.name === fileName);
+      if (existingIndex >= 0) {
+        diaryCache[existingIndex] = cacheEntry;
+      } else {
+        diaryCache.unshift(cacheEntry);
+      }
+
       $('writeArea').value = '';
       showToast('已保存到 GitHub');
       setSyncBadge('', '已同步');
@@ -712,13 +727,20 @@
   async function loadDiaryList() {
     if (!config || !config.token) { showToast('请先完成设置'); switchPage('settings'); return; }
 
-    $('diaryList').innerHTML = '';
-    $('listEmpty').style.display = 'none';
-    $('listStatus').textContent = '正在从 GitHub 加载...';
+    // Render cache instantly if available
+    if (diaryCache.length > 0) {
+      renderDiaryList(diaryCache, '已缓存，后台同步中...');
+    } else {
+      $('diaryList').innerHTML = '';
+      $('listEmpty').style.display = 'none';
+      $('listStatus').textContent = '正在从 GitHub 加载...';
+    }
 
     try {
       const files = await apiGet(`/contents/${DIARY_DIR}`);
       if (!files || !Array.isArray(files) || files.length === 0) {
+        diaryCache = [];
+        $('diaryList').innerHTML = '';
         $('listEmpty').style.display = 'block';
         $('listStatus').textContent = '';
         return;
@@ -729,12 +751,14 @@
         .sort((a, b) => b.name.localeCompare(a.name));
 
       if (mdFiles.length === 0) {
+        diaryCache = [];
         $('listEmpty').style.display = 'block';
         $('listStatus').textContent = '';
         return;
       }
 
-      $('listStatus').textContent = `共 ${mdFiles.length} 篇日记（来自 GitHub）`;
+      // Build fresh cache from API
+      diaryCache = [];
       for (const f of mdFiles) {
         const dateMatch = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
         let dateLabel = f.name.replace('.md','');
@@ -755,20 +779,33 @@
           }
         } catch(e) {}
 
-        const li = document.createElement('li');
-        li.className = 'diary-item';
-        li.innerHTML = `<div class="date">${dateLabel}<span class="weekday">${wday}</span></div><div class="preview">${preview}</div>`;
-        li.addEventListener('click', () => showDetail(f.name));
-        $('diaryList').appendChild(li);
+        diaryCache.push({ name: f.name, dateLabel, weekday: wday, preview });
       }
+
+      renderDiaryList(diaryCache, `共 ${mdFiles.length} 篇日记（来自 GitHub）`);
     } catch (err) {
       console.error(err);
-      $('diaryList').innerHTML = '';
-      $('listEmpty').style.display = 'block';
+      if (diaryCache.length === 0) {
+        $('diaryList').innerHTML = '';
+        $('listEmpty').style.display = 'block';
+      }
       $('listStatus').textContent = '加载失败';
       let msg = err.message || '';
       if (msg.includes('404')) msg = '目录不存在，请先写一篇日记';
       showToast('加载失败: ' + msg);
+    }
+  }
+
+  function renderDiaryList(items, statusText) {
+    $('diaryList').innerHTML = '';
+    $('listEmpty').style.display = 'none';
+    $('listStatus').textContent = statusText;
+    for (const item of items) {
+      const li = document.createElement('li');
+      li.className = 'diary-item';
+      li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div><div class="preview">${item.preview}</div>`;
+      li.addEventListener('click', () => showDetail(item.name));
+      $('diaryList').appendChild(li);
     }
   }
 
@@ -923,6 +960,14 @@
   });
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => switchPage(btn.dataset.page));
+  });
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      if ($('page-write').classList.contains('active')) {
+        saveDiary();
+      }
+    }
   });
   window.addEventListener('online', updateOnlineStatus);
   window.addEventListener('offline', updateOnlineStatus);
