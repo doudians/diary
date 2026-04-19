@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>极简日记</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #fafafa;
+    --text: #222;
+    --text-secondary: #888;
+    --border: #e5e5e5;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --surface: #fff;
+    --danger: #dc2626;
+  }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow: hidden;
+  }
+  #app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-width: 720px;
+    margin: 0 auto;
+    background: var(--surface);
+    position: relative;
+  }
+
+  /* Header */
+  .header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    z-index: 10;
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+  .header .subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  /* Content area */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    position: relative;
+  }
+  .page {
+    display: none;
+    padding: 20px;
+    min-height: 100%;
+  }
+  .page.active { display: block; }
+
+  /* Write page */
+  .write-area {
+    width: 100%;
+    min-height: 60vh;
+    border: none;
+    outline: none;
+    font-size: 17px;
+    line-height: 1.8;
+    resize: none;
+    font-family: inherit;
+    color: var(--text);
+    background: transparent;
+  }
+  .write-area::placeholder {
+    color: #ccc;
+  }
+
+  /* Save button */
+  .save-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 20;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  .save-bar .status {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .save-bar .status.offline {
+    color: var(--danger);
+  }
+  .btn {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn:active { opacity: 0.8; }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+  .btn-secondary {
+    background: var(--border);
+    color: var(--text);
+  }
+  .btn-danger {
+    background: #fee2e2;
+    color: var(--danger);
+  }
+
+  /* List page */
+  .diary-list {
+    list-style: none;
+    padding-bottom: 80px;
+  }
+  .diary-item {
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .diary-item:active { background: var(--bg); }
+  .diary-item .date {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .diary-item .weekday {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: 6px;
+    font-weight: 400;
+  }
+  .diary-item .preview {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+  }
+  .empty-state svg {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 16px;
+    opacity: 0.3;
+  }
+
+  /* Detail page */
+  .detail-body {
+    font-size: 16px;
+    line-height: 1.8;
+    padding-bottom: 80px;
+  }
+  .detail-body h1 {
+    font-size: 22px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+  }
+  .detail-body h2 {
+    font-size: 16px;
+    color: var(--accent);
+    margin: 20px 0 8px;
+  }
+  .detail-body p {
+    margin-bottom: 12px;
+  }
+  .detail-body br { display: block; content: ""; margin: 4px 0; }
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+
+  /* Settings page */
+  .form-group {
+    margin-bottom: 20px;
+  }
+  .form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .form-group input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 15px;
+    font-family: inherit;
+    background: var(--bg);
+    -webkit-appearance: none;
+  }
+  .form-group input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--surface);
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+  .settings-actions {
+    margin-top: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .settings-actions .btn {
+    width: 100%;
+  }
+
+  /* Nav */
+  .nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 30;
+    max-width: 720px;
+    margin: 0 auto;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .nav-item {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border: none;
+    background: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .nav-item.active {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .nav-item svg {
+    display: block;
+    margin: 0 auto 2px;
+    width: 22px;
+    height: 22px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100px);
+    background: #333;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 100;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 0.8s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Hide save-bar when detail page is shown (detail has its own layout) */
+  .page-detail ~ .save-bar { display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header" id="header">
+    <h1 id="pageTitle">极简日记</h1>
+    <div class="subtitle" id="pageSubtitle"></div>
+  </div>
+
+  <div class="content" id="content">
+    <!-- Write -->
+    <div class="page active" id="page-write">
+      <textarea class="write-area" id="writeArea" placeholder="今天发生了什么..."></textarea>
+    </div>
+
+    <!-- List -->
+    <div class="page" id="page-list">
+      <ul class="diary-list" id="diaryList"></ul>
+      <div class="empty-state" id="listEmpty" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <p>还没有日记</p>
+        <p style="font-size:13px;margin-top:4px;">写下你的第一篇日记吧</p>
+      </div>
+    </div>
+
+    <!-- Detail -->
+    <div class="page" id="page-detail">
+      <a href="#" class="back-link" id="backLink">← 返回列表</a>
+      <div class="detail-body" id="detailBody"></div>
+    </div>
+
+    <!-- Settings -->
+    <div class="page" id="page-settings">
+      <div class="form-group">
+        <label>GitHub Token</label>
+        <input type="password" id="settingToken" placeholder="ghp_xxxx 或 github_pat_xxxx" autocomplete="off">
+        <div class="hint">Fine-grained PAT 需勾选 Contents 读写权限。Token 仅保存在本地浏览器。</div>
+      </div>
+      <div class="form-group">
+        <label>用户名 (GitHub Username)</label>
+        <input type="text" id="settingOwner" placeholder="例如：doudians" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>仓库名 (Repository)</label>
+        <input type="text" id="settingRepo" placeholder="例如：diary" autocomplete="off">
+        <div class="hint">仓库需提前创建，或填写新仓库名（保存时会自动检测并引导创建）。</div>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
+        <button class="btn btn-secondary" id="btnTestConnection">测试连接</button>
+        <button class="btn btn-danger" id="btnClearData">清除本地数据</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save bar (write page only) -->
+  <div class="save-bar" id="saveBar">
+    <span class="status" id="saveStatus">准备就绪</span>
+    <button class="btn btn-primary" id="btnSave">
+      <span id="saveSpinner" style="display:none;"><span class="spinner"></span></span>
+      <span id="saveText">保存</span>
+    </button>
+  </div>
+
+  <!-- Bottom nav -->
+  <div class="nav" id="nav">
+    <button class="nav-item active" data-page="write">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      写日记
+    </button>
+    <button class="nav-item" data-page="list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      日记
+    </button>
+    <button class="nav-item" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.68 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.82.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 15a1.65 1.65 0 00-.33 1.82V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09z"/></svg>
+      设置
+    </button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const LS_KEY = 'minidiary_config';
+  const DIARY_DIR = 'diary';
+
+  const $ = id => document.getElementById(id);
+  const fmtDate = d => {
+    const w = ['周日','周一','周二','周三','周四','周五','周六'];
+    return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${w[d.getDay()]}`;
+  };
+  const fmtDateShort = d => `${d.getMonth()+1}月${d.getDate()}日`;
+  const fmtFileDate = d => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  };
+  const fmtTime = d => {
+    const h = String(d.getHours()).padStart(2,'0');
+    const m = String(d.getMinutes()).padStart(2,'0');
+    return `${h}:${m}`;
+  };
+
+  let config = null;
+  let currentDate = new Date();
+  let isOnline = navigator.onLine;
+
+  function loadConfig() {
+    try {
+      config = JSON.parse(localStorage.getItem(LS_KEY));
+    } catch(e) { config = null; }
+    if (config) {
+      $('settingToken').value = config.token || '';
+      $('settingOwner').value = config.owner || '';
+      $('settingRepo').value = config.repo || '';
+    }
+    return !!config;
+  }
+
+  function saveConfig() {
+    config = {
+      token: $('settingToken').value.trim(),
+      owner: $('settingOwner').value.trim(),
+      repo: $('settingRepo').value.trim()
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(config));
+  }
+
+  function clearConfig() {
+    localStorage.removeItem(LS_KEY);
+    config = null;
+    $('settingToken').value = '';
+    $('settingOwner').value = '';
+    $('settingRepo').value = '';
+    showToast('本地数据已清除');
+  }
+
+  function showToast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  function setSaveState(saving) {
+    $('btnSave').disabled = saving || !isOnline;
+    $('saveSpinner').style.display = saving ? 'inline' : 'none';
+    $('saveText').textContent = saving ? '保存中' : '保存';
+  }
+
+  function updateOnlineStatus() {
+    isOnline = navigator.onLine;
+    const st = $('saveStatus');
+    if (!isOnline) {
+      st.textContent = '请连接网络后自动保存';
+      st.classList.add('offline');
+      $('btnSave').disabled = true;
+    } else {
+      st.textContent = '准备就绪';
+      st.classList.remove('offline');
+      $('btnSave').disabled = false;
+    }
+  }
+
+  function getApiBase() {
+    return `https://api.github.com/repos/${config.owner}/${config.repo}`;
+  }
+  function getHeaders() {
+    return {
+      'Authorization': `Bearer ${config.token}`,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json'
+    };
+  }
+
+  async function apiGet(path) {
+    const res = await fetch(getApiBase() + path, { headers: getHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async function apiPut(path, body) {
+    const res = await fetch(getApiBase() + path, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`HTTP ${res.status}: ${txt}`);
+    }
+    return res.json();
+  }
+
+  function utf8ToBase64(str) {
+    return btoa(unescape(encodeURIComponent(str)));
+  }
+  function base64ToUtf8(str) {
+    return decodeURIComponent(escape(atob(str)));
+  }
+
+  async function saveDiary() {
+    const text = $('writeArea').value.trim();
+    if (!text) { showToast('内容不能为空'); return; }
+    if (!config) { showToast('请先完成设置'); switchPage('settings'); return; }
+
+    setSaveState(true);
+    const fileName = `${fmtFileDate(currentDate)}.md`;
+    const path = `/${DIARY_DIR}/${fileName}`;
+    const timeStr = fmtTime(new Date());
+    const newEntry = `## ${timeStr}\n${text}\n\n`;
+
+    try {
+      let content = `# ${fmtFileDate(currentDate)}\n\n${newEntry}`;
+      let sha = null;
+      const existing = await apiGet(`/contents${path}`);
+      if (existing && existing.content) {
+        sha = existing.sha;
+        const existingText = base64ToUtf8(existing.content.replace(/\s/g, ''));
+        content = existingText.trimEnd() + '\n\n' + newEntry;
+      }
+
+      await apiPut(`/contents${path}`, {
+        message: `diary: ${fileName}`,
+        content: utf8ToBase64(content),
+        sha: sha || undefined
+      });
+
+      $('writeArea').value = '';
+      showToast('保存成功');
+    } catch (err) {
+      console.error(err);
+      showToast('保存失败: ' + (err.message || '未知错误'));
+    } finally {
+      setSaveState(false);
+    }
+  }
+
+  async function loadDiaryList() {
+    if (!config) { showToast('请先完成设置'); switchPage('settings'); return; }
+
+    $('diaryList').innerHTML = '<li class="empty-state"><span style="color:#888;">加载中...</span></li>';
+    $('listEmpty').style.display = 'none';
+
+    try {
+      const files = await apiGet(`/contents/${DIARY_DIR}`);
+      if (!files || !Array.isArray(files) || files.length === 0) {
+        $('diaryList').innerHTML = '';
+        $('listEmpty').style.display = 'block';
+        return;
+      }
+
+      const mdFiles = files
+        .filter(f => f.name.endsWith('.md'))
+        .sort((a, b) => b.name.localeCompare(a.name));
+
+      if (mdFiles.length === 0) {
+        $('diaryList').innerHTML = '';
+        $('listEmpty').style.display = 'block';
+        return;
+      }
+
+      $('diaryList').innerHTML = '';
+      for (const f of mdFiles) {
+        const dateMatch = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
+        let dateLabel = f.name.replace('.md','');
+        let wday = '';
+        if (dateMatch) {
+          const d = new Date(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3]);
+          dateLabel = fmtDateShort(d);
+          const w = ['周日','周一','周二','周三','周四','周五','周六'];
+          wday = w[d.getDay()];
+        }
+
+        let preview = '...';
+        try {
+          const detail = await apiGet(`/contents/${DIARY_DIR}/${f.name}`);
+          if (detail && detail.content) {
+            const full = base64ToUtf8(detail.content.replace(/\s/g, ''));
+            preview = full.replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}\s*/g, ' ').trim();
+            preview = preview.slice(0, 60).replace(/\n/g, ' ') + (preview.length > 60 ? '...' : '');
+          }
+        } catch(e) {}
+
+        const li = document.createElement('li');
+        li.className = 'diary-item';
+        li.innerHTML = `<div class="date">${dateLabel}<span class="weekday">${wday}</span></div><div class="preview">${preview}</div>`;
+        li.addEventListener('click', () => showDetail(f.name));
+        $('diaryList').appendChild(li);
+      }
+    } catch (err) {
+      console.error(err);
+      $('diaryList').innerHTML = '';
+      $('listEmpty').style.display = 'block';
+      showToast('加载失败: ' + err.message);
+    }
+  }
+
+  async function showDetail(fileName) {
+    if (!config) return;
+    try {
+      const detail = await apiGet(`/contents/${DIARY_DIR}/${fileName}`);
+      if (!detail || !detail.content) { showToast('读取失败'); return; }
+      const md = base64ToUtf8(detail.content.replace(/\s/g, ''));
+      $('detailBody').innerHTML = marked.parse(md);
+      switchPage('detail');
+    } catch (err) {
+      showToast('读取失败: ' + err.message);
+    }
+  }
+
+  function switchPage(page) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+    const map = {
+      write: { page: 'page-write', nav: 'write', title: fmtDate(currentDate), subtitle: '记录当下的想法' },
+      list: { page: 'page-list', nav: 'list', title: '日记列表', subtitle: '' },
+      detail: { page: 'page-detail', nav: 'list', title: '日记详情', subtitle: '' },
+      settings: { page: 'page-settings', nav: 'settings', title: '设置', subtitle: 'GitHub 连接配置' }
+    };
+    const m = map[page];
+    if (!m) return;
+
+    $(m.page).classList.add('active');
+    document.querySelector(`.nav-item[data-page="${m.nav}"]`).classList.add('active');
+    $('pageTitle').textContent = m.title;
+    $('pageSubtitle').textContent = m.subtitle;
+
+    if (page === 'write') {
+      $('saveBar').style.display = 'flex';
+      $('nav').style.display = 'flex';
+      setTimeout(() => $('writeArea').focus(), 100);
+    } else if (page === 'detail') {
+      $('saveBar').style.display = 'none';
+      $('nav').style.display = 'none';
+    } else {
+      $('saveBar').style.display = 'none';
+      $('nav').style.display = 'flex';
+    }
+
+    if (page === 'list') loadDiaryList();
+  }
+
+  async function testConnection() {
+    const token = $('settingToken').value.trim();
+    const owner = $('settingOwner').value.trim();
+    const repo = $('settingRepo').value.trim();
+    if (!token || !owner || !repo) { showToast('请填写完整信息'); return; }
+
+    const tmp = config;
+    config = { token, owner, repo };
+    try {
+      const res = await apiGet('');
+      if (res && res.id) {
+        showToast(`连接成功: ${res.full_name}`);
+      } else {
+        showToast('连接失败: 未找到仓库');
+      }
+    } catch (err) {
+      showToast('连接失败: ' + err.message);
+    }
+    config = tmp;
+  }
+
+  // Events
+  $('btnSave').addEventListener('click', saveDiary);
+  $('btnSaveSettings').addEventListener('click', () => {
+    saveConfig();
+    showToast('设置已保存');
+    switchPage('write');
+  });
+  $('btnTestConnection').addEventListener('click', testConnection);
+  $('btnClearData').addEventListener('click', () => {
+    if (confirm('确定要清除所有本地保存的 Token 和设置吗？')) {
+      clearConfig();
+    }
+  });
+  $('backLink').addEventListener('click', e => {
+    e.preventDefault();
+    switchPage('list');
+  });
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.page));
+  });
+  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('offline', updateOnlineStatus);
+
+  // Init
+  updateOnlineStatus();
+  const hasConfig = loadConfig();
+  if (hasConfig) {
+    switchPage('write');
+  } else {
+    switchPage('settings');
+  }
+})();
+</script>
+</body>
+</html>
