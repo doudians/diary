@@ -422,6 +422,11 @@
         <div class="hint">Fine-grained PAT 需勾选 Contents 读写权限，并授权本仓库。</div>
       </div>
       <div class="form-group">
+        <label>同步密码（6位数字，用于加密书签链接）</label>
+        <input type="password" id="settingSyncPwd" placeholder="123456" maxlength="6" inputmode="numeric" pattern="\d{6}">
+        <div class="hint">设置后生成的书签链接将被加密，换设备打开时需输入此密码才能解密 Token。</div>
+      </div>
+      <div class="form-group">
         <label>用户名</label>
         <input type="text" id="settingOwner" placeholder="doudians" autocomplete="off">
       </div>
@@ -452,7 +457,14 @@
       <div class="form-group" id="bookmarkBox" style="display:none;margin-top:12px;">
         <label>专属书签链接（收藏此链接即可跨设备免登录）</label>
         <div class="hint code" id="bookmarkText" style="word-break:break-all;"></div>
-        <div class="hint" style="margin-top:6px;">把上方链接收藏到浏览器书签或微信收藏，换设备时直接打开即可自动登录。链接中的 Token 仅保存在本地浏览器。</div>
+        <div class="hint" style="margin-top:6px;">把上方链接收藏到浏览器书签或微信收藏，换设备时直接打开即可自动登录。链接已加密，需密码解密。</div>
+      </div>
+
+      <div class="form-group" id="decryptBox" style="display:none;margin-top:12px;">
+        <label>此链接已加密，请输入同步密码</label>
+        <input type="password" id="decryptPwd" placeholder="6位密码" maxlength="6" inputmode="numeric" pattern="\d{6}">
+        <button class="btn btn-primary btn-small" id="btnDecrypt" style="margin-top:8px;">解密并登录</button>
+        <div class="hint" style="margin-top:6px;">密码错误将无法解密。如忘记密码，请重新生成书签链接。</div>
       </div>
 
       <div class="settings-actions">
@@ -521,6 +533,39 @@
   let currentDetailFile = null;
   let currentDetailSha = null;
 
+  // Web Crypto helpers for encrypted bookmarks
+  async function deriveKey(password, salt) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+    );
+  }
+
+  async function encryptConfig(cfg, password) {
+    const enc = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(password, salt);
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(cfg)));
+    const buf = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+    buf.set(salt, 0);
+    buf.set(iv, salt.length);
+    buf.set(new Uint8Array(ciphertext), salt.length + iv.length);
+    return btoa(String.fromCharCode(...buf));
+  }
+
+  async function decryptConfig(encBase64, password) {
+    const buf = Uint8Array.from(atob(encBase64), c => c.charCodeAt(0));
+    const salt = buf.slice(0, 16);
+    const iv = buf.slice(16, 28);
+    const ciphertext = buf.slice(28);
+    const key = await deriveKey(password, salt);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+    return JSON.parse(new TextDecoder().decode(plaintext));
+  }
+
   function applyHashConfig() {
     const hash = location.hash;
     if (!hash || !hash.startsWith('#cfg=')) return false;
@@ -528,17 +573,45 @@
       const payload = hash.slice(5);
       const cfg = JSON.parse(base64ToUtf8(payload));
       if (!cfg.token) return false;
-      config = {
-        token: cfg.token,
-        owner: cfg.owner || DEFAULT_OWNER,
-        repo: cfg.repo || DEFAULT_REPO
-      };
+      config = { token: cfg.token, owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
       localStorage.setItem(LS_KEY, JSON.stringify(config));
       history.replaceState(null, '', location.pathname + location.search);
       return true;
     } catch(e) {
       console.error('hash config error', e);
       return false;
+    }
+  }
+
+  function applyEncConfig() {
+    const hash = location.hash;
+    if (!hash || !hash.startsWith('#enc=')) return false;
+    // Show decrypt UI
+    switchPage('settings');
+    $('decryptBox').style.display = 'block';
+    $('bookmarkBox').style.display = 'none';
+    $('exportBox').style.display = 'none';
+    $('importBox').style.display = 'none';
+    return true;
+  }
+
+  async function decryptAndLoad() {
+    const hash = location.hash;
+    if (!hash || !hash.startsWith('#enc=')) return;
+    const pwd = $('decryptPwd').value.trim();
+    if (!/^\d{6}$/.test(pwd)) { showToast('请输入6位数字密码'); return; }
+    try {
+      const encPayload = hash.slice(5);
+      const cfg = await decryptConfig(encPayload, pwd);
+      if (!cfg.token) throw new Error('无效配置');
+      config = { token: cfg.token, owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
+      localStorage.setItem(LS_KEY, JSON.stringify(config));
+      history.replaceState(null, '', location.pathname + location.search);
+      $('decryptPwd').value = '';
+      showToast('解密成功，已自动登录');
+      switchPage('write');
+    } catch(e) {
+      showToast('解密失败: 密码错误或链接已损坏');
     }
   }
 
@@ -961,16 +1034,22 @@
     }
   }
 
-  function generateBookmarkLink() {
+  async function generateBookmarkLink() {
     const token = $('settingToken').value.trim();
     const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
     const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
+    const pwd = $('settingSyncPwd').value.trim();
     if (!token) { showToast('请先填写 Token'); return; }
-    const payload = utf8ToBase64(JSON.stringify({ token, owner, repo, v: 2 }));
-    const url = location.origin + location.pathname + '#cfg=' + payload;
-    $('bookmarkText').textContent = url;
-    $('bookmarkBox').style.display = 'block';
-    showToast('链接已生成，请收藏到书签');
+    if (!/^\d{6}$/.test(pwd)) { showToast('请设置6位数字同步密码'); $('settingSyncPwd').focus(); return; }
+    try {
+      const payload = await encryptConfig({ token, owner, repo, v: 2 }, pwd);
+      const url = location.origin + location.pathname + '#enc=' + payload;
+      $('bookmarkText').textContent = url;
+      $('bookmarkBox').style.display = 'block';
+      showToast('加密链接已生成，请收藏到书签');
+    } catch(e) {
+      showToast('加密失败: ' + e.message);
+    }
   }
 
   function updateWriteModeUI() {
@@ -1039,6 +1118,7 @@
   $('btnImport').addEventListener('click', importConfig);
   $('btnDoImport').addEventListener('click', doImport);
   $('btnBookmark').addEventListener('click', generateBookmarkLink);
+  $('btnDecrypt').addEventListener('click', decryptAndLoad);
   $('btnEdit').addEventListener('click', startEdit);
   $('btnDelete').addEventListener('click', deleteDiary);
   $('btnClearData').addEventListener('click', () => {
@@ -1066,9 +1146,12 @@
 
   // Init
   updateOnlineStatus();
+  const encPending = applyEncConfig();
   const hashLoaded = applyHashConfig();
   const hasConfig = loadConfig();
-  if (hashLoaded) {
+  if (encPending) {
+    // wait for user to enter password
+  } else if (hashLoaded) {
     showToast('已通过书签链接自动登录');
     switchPage('write');
   } else if (hasConfig) {
