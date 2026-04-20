@@ -471,6 +471,13 @@
         <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
         <button class="btn btn-danger" id="btnClearData">清除本地数据</button>
       </div>
+
+      <!-- Debug Panel (shown when ?debug=1) -->
+      <div id="debugPanel" style="display:none;margin-top:24px;padding:16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">
+        <h3 style="font-size:14px;color:#475569;margin-bottom:12px;">🔧 调试模式 (debug=1)</h3>
+        <div id="debugLog" style="font-family:monospace;font-size:12px;color:#334155;line-height:1.6;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;"></div>
+        <button class="btn btn-secondary btn-small" id="btnClearDebug" style="margin-top:8px;">清空日志</button>
+      </div>
     </div>
   </div>
 
@@ -529,6 +536,31 @@
 
   const $ = id => document.getElementById(id);
   const halfWidth = str => str.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+
+  // Debug mode: ?debug=1 enables verbose crypto logging
+  const DEBUG = new URLSearchParams(location.search).get('debug') === '1';
+  function dbg(label, ...args) {
+    if (!DEBUG) return;
+    const line = `[${label}] ` + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    console.log(line);
+    const panel = $('debugLog');
+    if (panel) {
+      panel.textContent += line + '\n';
+      panel.scrollTop = panel.scrollHeight;
+    }
+  }
+
+  // URL-safe Base64 helpers: standard Base64 uses +/= which break in URLs
+  function toUrlSafeBase64(base64) {
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+  function fromUrlSafeBase64(urlSafe) {
+    // Also replace spaces with + (some email clients/browsers turn + into space)
+    let b64 = (urlSafe || '').replace(/\s/g, '+').replace(/-/g, '+').replace(/_/g, '/');
+    // Pad with = to multiple of 4
+    while (b64.length % 4 !== 0) b64 += '=';
+    return b64;
+  }
   const w = ['周日','周一','周二','周三','周四','周五','周六'];
   const fmtDate = d => `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${w[d.getDay()]}`;
   const fmtDateShort = d => `${d.getMonth()+1}月${d.getDate()}日`;
@@ -559,34 +591,57 @@
   // Web Crypto helpers for encrypted bookmarks
   async function deriveKey(password, salt) {
     const enc = new TextEncoder();
+    dbg('deriveKey', 'password length=', password.length, 'salt len=', salt.length, 'iterations=100000', 'hash=SHA-256');
     const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']);
-    return crypto.subtle.deriveKey(
+    const key = await crypto.subtle.deriveKey(
       { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
       keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
     );
+    dbg('deriveKey', 'key derived successfully');
+    return key;
   }
 
   async function encryptConfig(cfg, password) {
+    dbg('encrypt', 'START password=', password, 'password.length=', password.length);
     const enc = new TextEncoder();
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const iv = crypto.getRandomValues(new Uint8Array(12));
+    dbg('encrypt', 'salt=', Array.from(salt).map(b=>b.toString(16).padStart(2,'0')).join(''));
+    dbg('encrypt', 'iv=', Array.from(iv).map(b=>b.toString(16).padStart(2,'0')).join(''));
     const key = await deriveKey(password, salt);
-    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(cfg)));
+    const plainText = JSON.stringify(cfg);
+    dbg('encrypt', 'plaintext length=', plainText.length);
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plainText));
+    dbg('encrypt', 'ciphertext length=', ciphertext.byteLength);
     const buf = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
     buf.set(salt, 0);
     buf.set(iv, salt.length);
     buf.set(new Uint8Array(ciphertext), salt.length + iv.length);
-    return btoa(String.fromCharCode(...buf));
+    const standardB64 = btoa(String.fromCharCode(...buf));
+    dbg('encrypt', 'standardB64 length=', standardB64.length, 'first30=', standardB64.slice(0,30));
+    const urlSafe = toUrlSafeBase64(standardB64);
+    dbg('encrypt', 'urlSafe length=', urlSafe.length, 'first30=', urlSafe.slice(0,30));
+    return urlSafe;
   }
 
   async function decryptConfig(encBase64, password) {
-    const buf = Uint8Array.from(atob(encBase64), c => c.charCodeAt(0));
+    dbg('decrypt', 'START password=', password, 'password.length=', password.length);
+    dbg('decrypt', 'raw input length=', encBase64.length, 'first30=', encBase64.slice(0,30));
+    const standardB64 = fromUrlSafeBase64(encBase64);
+    dbg('decrypt', 'standardB64 length=', standardB64.length, 'first30=', standardB64.slice(0,30));
+    const buf = Uint8Array.from(atob(standardB64), c => c.charCodeAt(0));
+    dbg('decrypt', 'decoded buf length=', buf.length);
     const salt = buf.slice(0, 16);
     const iv = buf.slice(16, 28);
     const ciphertext = buf.slice(28);
+    dbg('decrypt', 'salt=', Array.from(salt).map(b=>b.toString(16).padStart(2,'0')).join(''));
+    dbg('decrypt', 'iv=', Array.from(iv).map(b=>b.toString(16).padStart(2,'0')).join(''));
+    dbg('decrypt', 'ciphertext length=', ciphertext.length);
     const key = await deriveKey(password, salt);
     const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-    return JSON.parse(new TextDecoder().decode(plaintext));
+    const result = JSON.parse(new TextDecoder().decode(plaintext));
+    dbg('decrypt', 'SUCCESS');
+    return result;
   }
 
   function applyHashConfig() {
@@ -631,8 +686,13 @@
   async function tryUnlock() {
     const hash = location.hash;
     if (!hash || !hash.startsWith('#enc=')) return;
-    const payload = hash.slice(5);
-    const pwd = halfWidth($('unlockPwd').value.trim());
+    // hash may be URL-encoded by browser; decode it just in case
+    let payload = hash.slice(5);
+    try { payload = decodeURIComponent(payload); } catch(e) {}
+    console.log('[tryUnlock] hash length=', hash.length, 'payload length=', payload.length, 'payload first30=', payload.slice(0,30));
+    const rawPwd = $('unlockPwd').value.trim();
+    const pwd = halfWidth(rawPwd);
+    console.log('[tryUnlock] raw password length=', rawPwd.length, 'after halfWidth length=', pwd.length);
     if (!/^\d{6}$/.test(pwd)) {
       $('unlockStatus').textContent = '请输入6位数字密码';
       return;
@@ -1050,15 +1110,23 @@
   }
 
   async function testConnection() {
-    const token = $('settingToken').value.trim() || pendingMigrateToken || memToken;
+    const tokenFromInput = $('settingToken').value.trim();
+    const token = tokenFromInput || pendingMigrateToken || memToken;
     const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
     const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
+
+    console.log('[testConnection] input token length=', tokenFromInput.length, 'prefix=', tokenFromInput ? tokenFromInput.slice(0, 10) : 'EMPTY');
+    console.log('[testConnection] resolved token source=', tokenFromInput ? 'input' : (pendingMigrateToken ? 'pendingMigrate' : (memToken ? 'memToken' : 'NONE')));
+    console.log('[testConnection] owner=', owner, 'repo=', repo);
+    console.log('[testConnection] memToken before=', memToken ? 'SET' : 'NULL', 'config before=', JSON.stringify(config));
+
     if (!token || !owner || !repo) { showToast('请填写完整信息'); return; }
 
     const tmpToken = memToken;
     const tmpCfg = config;
     memToken = token;
     config = { owner, repo };
+    console.log('[testConnection] memToken after assign=', memToken ? 'SET' : 'NULL');
     try {
       await ensureDiaryDir();
       const testPath = '/diary/.diary-test';
@@ -1076,14 +1144,17 @@
       }
       showToast('连接成功 — 读写权限正常');
     } catch (err) {
+      console.log('[testConnection] ERROR:', err.message, err.stack);
       let msg = err.message || '';
       if (msg.includes('401')) msg = 'Token 无效';
       else if (msg.includes('403')) msg = 'Token 无权限，请检查是否授权本仓库 Contents 读写';
       else if (msg.includes('404')) msg = '仓库不存在';
       showToast('连接失败: ' + msg);
+    } finally {
+      memToken = tmpToken;
+      config = tmpCfg;
+      console.log('[testConnection] restored memToken=', memToken ? 'SET' : 'NULL');
     }
-    memToken = tmpToken;
-    config = tmpCfg;
   }
 
   function exportConfig() {
@@ -1124,11 +1195,14 @@
     const token = $('settingToken').value.trim() || pendingMigrateToken || memToken;
     const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
     const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
-    const pwd = $('settingSyncPwd').value.trim();
+    const rawPwd = $('settingSyncPwd').value.trim();
+    const pwd = halfWidth(rawPwd);
+    console.log('[generateBookmarkLink] raw password length=', rawPwd.length, 'after halfWidth length=', pwd.length);
     if (!token) { showToast('请先填写 Token 或解锁'); return; }
     if (!/^\d{6}$/.test(pwd)) { showToast('请设置6位数字同步密码'); $('settingSyncPwd').focus(); return; }
     try {
       const payload = await encryptConfig({ token, owner, repo, v: 2 }, pwd);
+      console.log('[generateBookmarkLink] encrypted payload length=', payload.length, 'first50=', payload.slice(0,50));
       const url = location.origin + location.pathname + '#enc=' + payload;
       $('bookmarkText').textContent = url;
       $('bookmarkBox').style.display = 'block';
@@ -1213,6 +1287,11 @@
       clearConfig();
     }
   });
+  if ($('btnClearDebug')) {
+    $('btnClearDebug').addEventListener('click', () => {
+      if ($('debugLog')) $('debugLog').textContent = '';
+    });
+  }
   $('backLink').addEventListener('click', e => {
     e.preventDefault();
     switchPage('list');
@@ -1232,6 +1311,10 @@
   window.addEventListener('offline', updateOnlineStatus);
 
   // Init
+  if (DEBUG && $('debugPanel')) {
+    $('debugPanel').style.display = 'block';
+    dbg('INIT', 'Debug mode enabled. Page URL:', location.href);
+  }
   updateOnlineStatus();
   const hasCfgHash = applyHashConfig();
   const hasEncHash = applyEncConfig();
