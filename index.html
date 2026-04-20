@@ -495,9 +495,26 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.68 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.82.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 15a1.65 1.65 0 00-.33 1.82V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09z"/></svg>
       设置
     </button>
+    <button class="nav-item" id="btnLogout">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      退出
+    </button>
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- Unlock Overlay -->
+  <div id="unlockOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#fff;z-index:1000;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;">
+    <h2 style="margin-bottom:8px;font-size:22px;">验证身份</h2>
+    <p style="color:#888;margin-bottom:24px;font-size:14px;">此链接已加密，请输入同步密码解锁</p>
+    <input type="password" id="unlockPwd" placeholder="6位数字密码" maxlength="6" inputmode="numeric" pattern="\d{6}" style="width:200px;padding:12px 16px;font-size:18px;text-align:center;letter-spacing:8px;border:1px solid #e5e5e5;border-radius:8px;margin-bottom:16px;outline:none;">
+    <button class="btn btn-primary" id="btnUnlock" style="width:200px;">解锁</button>
+    <p id="unlockStatus" style="margin-top:12px;font-size:13px;color:#dc2626;min-height:20px;"></p>
+    <label style="margin-top:20px;font-size:13px;color:#666;display:flex;align-items:center;gap:6px;cursor:pointer;">
+      <input type="checkbox" id="trustDevice" style="width:16px;height:16px;">
+      信任此设备 7 天
+    </label>
+  </div>
 </div>
 
 <script>
@@ -505,6 +522,7 @@
   'use strict';
 
   const LS_KEY = 'minidiary_config_v2';
+  const PWD_KEY = 'minidiary_pwd_v2';
   const DIARY_DIR = 'diary';
   const DEFAULT_OWNER = 'doudians';
   const DEFAULT_REPO = 'diary';
@@ -525,7 +543,11 @@
     return `${h}:${m}`;
   };
 
-  let config = null;
+  let config = null; // { owner, repo } only, NEVER token
+  let memToken = null; // Token lives ONLY in memory, never localStorage
+  let memPassword = null; // Session password in memory
+  let pendingMigrateToken = null; // For old plain-text #cfg migration
+  let unlockAttempts = 0;
   let currentDate = new Date();
   let isOnline = navigator.onLine;
   let diaryCache = []; // in-memory cache for instant list updates
@@ -570,50 +592,88 @@
     const hash = location.hash;
     if (!hash || !hash.startsWith('#cfg=')) return false;
     const payload = hash.slice(5);
-
-    // 1. Compatibility: old plain-text cfg
     try {
       const cfg = JSON.parse(base64ToUtf8(payload));
       if (cfg.token) {
-        config = { token: cfg.token, owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
+        pendingMigrateToken = cfg.token;
+        config = { owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
         localStorage.setItem(LS_KEY, JSON.stringify(config));
         history.replaceState(null, '', location.pathname + location.search);
-        showToast('检测到旧版明文链接，请立即设置同步密码并重新生成加密书签');
+        showToast('检测到旧版明文链接，请设置同步密码并重新生成加密书签');
         switchPage('settings');
         $('settingSyncPwd').focus();
         return true;
       }
-    } catch(e) {
-      // Not old plain-text format
-    }
+    } catch(e) {}
+    return false;
+  }
 
-    // 2. New encrypted cfg - show password input
-    switchPage('settings');
-    $('decryptBox').style.display = 'block';
-    $('bookmarkBox').style.display = 'none';
-    $('exportBox').style.display = 'none';
-    $('importBox').style.display = 'none';
+  function applyEncConfig() {
+    const hash = location.hash;
+    if (!hash || !hash.startsWith('#enc=')) return false;
+    showUnlockOverlay();
     return true;
   }
 
-  async function decryptAndLoad() {
+  function showUnlockOverlay() {
+    $('unlockOverlay').style.display = 'flex';
+    $('unlockPwd').value = '';
+    $('unlockStatus').textContent = '';
+    unlockAttempts = 0;
+    setTimeout(() => $('unlockPwd').focus(), 100);
+  }
+
+  function hideUnlockOverlay() {
+    $('unlockOverlay').style.display = 'none';
+  }
+
+  async function tryUnlock() {
     const hash = location.hash;
-    if (!hash || !hash.startsWith('#cfg=')) return;
+    if (!hash || !hash.startsWith('#enc=')) return;
     const payload = hash.slice(5);
-    const pwd = $('decryptPwd').value.trim();
-    if (!/^\d{6}$/.test(pwd)) { showToast('请输入6位数字密码'); return; }
+    const pwd = $('unlockPwd').value.trim();
+    if (!/^\d{6}$/.test(pwd)) {
+      $('unlockStatus').textContent = '请输入6位数字密码';
+      return;
+    }
     try {
       const cfg = await decryptConfig(payload, pwd);
       if (!cfg.token) throw new Error('无效配置');
-      config = { token: cfg.token, owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
+      memToken = cfg.token;
+      memPassword = pwd;
+      config = { owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
       localStorage.setItem(LS_KEY, JSON.stringify(config));
       history.replaceState(null, '', location.pathname + location.search);
-      $('decryptPwd').value = '';
-      showToast('解密成功，已自动登录');
+      if ($('trustDevice').checked) {
+        saveTrustedPassword(pwd);
+      }
+      hideUnlockOverlay();
+      showToast('解锁成功');
       switchPage('write');
     } catch(e) {
-      showToast('解密失败: 请输入同步密码');
+      unlockAttempts++;
+      const remaining = Math.max(0, 3 - unlockAttempts);
+      if (unlockAttempts >= 3) {
+        history.replaceState(null, '', location.pathname + location.search);
+        hideUnlockOverlay();
+        memToken = null;
+        memPassword = null;
+        showToast('尝试次数过多，已清除加密链接');
+        switchPage('settings');
+      } else {
+        $('unlockStatus').textContent = `密码错误，剩余 ${remaining} 次尝试`;
+        $('unlockPwd').value = '';
+        $('unlockPwd').focus();
+      }
     }
+  }
+
+  async function decryptAndLoad() {
+    // Legacy fallback for decryptBox in settings page
+    const text = $('decryptPwd').value.trim();
+    if (!/^\d{6}$/.test(text)) { showToast('请输入6位数字密码'); return; }
+    $('unlockPwd').value = text;
+    await tryUnlock();
   }
 
   function loadConfig() {
@@ -621,19 +681,17 @@
       config = JSON.parse(localStorage.getItem(LS_KEY));
     } catch(e) { config = null; }
     if (config) {
-      $('settingToken').value = config.token || '';
       $('settingOwner').value = config.owner || DEFAULT_OWNER;
       $('settingRepo').value = config.repo || DEFAULT_REPO;
     } else {
       $('settingOwner').value = DEFAULT_OWNER;
       $('settingRepo').value = DEFAULT_REPO;
     }
-    return !!(config && config.token);
+    return !!(config && config.owner && config.repo);
   }
 
   function saveConfig() {
     config = {
-      token: $('settingToken').value.trim(),
       owner: $('settingOwner').value.trim() || DEFAULT_OWNER,
       repo: $('settingRepo').value.trim() || DEFAULT_REPO
     };
@@ -642,11 +700,34 @@
 
   function clearConfig() {
     localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(PWD_KEY);
     config = null;
+    memToken = null;
+    memPassword = null;
+    pendingMigrateToken = null;
     $('settingToken').value = '';
     $('settingOwner').value = DEFAULT_OWNER;
     $('settingRepo').value = DEFAULT_REPO;
     showToast('本地数据已清除');
+  }
+
+  function saveTrustedPassword(password) {
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    localStorage.setItem(PWD_KEY, JSON.stringify({ password, expiresAt }));
+  }
+
+  function getTrustedPassword() {
+    try {
+      const pwdData = JSON.parse(localStorage.getItem(PWD_KEY));
+      if (pwdData && pwdData.expiresAt > Date.now()) {
+        return pwdData.password;
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  function clearTrustedPassword() {
+    localStorage.removeItem(PWD_KEY);
   }
 
   function showToast(msg) {
@@ -692,8 +773,9 @@
     return `https://api.github.com/repos/${config.owner}/${config.repo}`;
   }
   function getHeaders() {
+    if (!memToken) throw new Error('未登录，请解锁或设置 Token');
     return {
-      'Authorization': `Bearer ${config.token}`,
+      'Authorization': `Bearer ${memToken}`,
       'Accept': 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
       'Content-Type': 'application/json'
@@ -746,7 +828,7 @@
   async function saveDiary() {
     const text = $('writeArea').value.trim();
     if (!text) { showToast('内容不能为空'); return; }
-    if (!config || !config.token) { showToast('请先完成设置'); switchPage('settings'); return; }
+    if (!memToken) { showToast('请先设置 Token 或解锁'); switchPage('settings'); return; }
 
     setSaveState(true);
     setSyncBadge('pending', '同步中...');
@@ -829,7 +911,7 @@
   }
 
   async function loadDiaryList() {
-    if (!config || !config.token) { showToast('请先完成设置'); switchPage('settings'); return; }
+    if (!memToken) { showToast('请先设置 Token 或解锁'); switchPage('settings'); return; }
 
     // Render cache instantly if available
     if (diaryCache.length > 0) {
@@ -1002,10 +1084,10 @@
   }
 
   function exportConfig() {
-    const token = $('settingToken').value.trim();
+    const token = $('settingToken').value.trim() || pendingMigrateToken || memToken;
     const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
     const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
-    if (!token) { showToast('请先填写 Token'); return; }
+    if (!token) { showToast('请先填写 Token 或解锁'); return; }
     const payload = utf8ToBase64(JSON.stringify({ token, owner, repo, v: 2 }));
     $('exportText').textContent = payload;
     $('exportBox').style.display = 'block';
@@ -1024,11 +1106,11 @@
     try {
       const cfg = JSON.parse(base64ToUtf8(text));
       if (!cfg.token) throw new Error('无效配置');
-      $('settingToken').value = cfg.token;
+      pendingMigrateToken = cfg.token;
       $('settingOwner').value = cfg.owner || DEFAULT_OWNER;
       $('settingRepo').value = cfg.repo || DEFAULT_REPO;
       saveConfig();
-      showToast('配置已导入并保存');
+      showToast('配置已导入，请设置同步密码并生成加密书签');
       $('importBox').style.display = 'none';
     } catch(e) {
       showToast('导入失败: 字符串无效');
@@ -1036,18 +1118,19 @@
   }
 
   async function generateBookmarkLink() {
-    const token = $('settingToken').value.trim();
+    const token = $('settingToken').value.trim() || pendingMigrateToken || memToken;
     const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
     const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
     const pwd = $('settingSyncPwd').value.trim();
-    if (!token) { showToast('请先填写 Token'); return; }
+    if (!token) { showToast('请先填写 Token 或解锁'); return; }
     if (!/^\d{6}$/.test(pwd)) { showToast('请设置6位数字同步密码'); $('settingSyncPwd').focus(); return; }
     try {
       const payload = await encryptConfig({ token, owner, repo, v: 2 }, pwd);
-      const url = location.origin + location.pathname + '#cfg=' + payload;
+      const url = location.origin + location.pathname + '#enc=' + payload;
       $('bookmarkText').textContent = url;
       $('bookmarkBox').style.display = 'block';
-      showToast('加密链接已生成，请收藏到书签');
+      showToast('请牢记您的6位同步密码，链接丢失或泄露后没有密码无法访问');
+      pendingMigrateToken = null;
     } catch(e) {
       showToast('加密失败: ' + e.message);
     }
@@ -1147,12 +1230,14 @@
 
   // Init
   updateOnlineStatus();
-  const hashLoaded = applyHashConfig();
-  const hasConfig = loadConfig();
-  if (hashLoaded) {
-    // old plain text migrated inside applyHashConfig
-    // encrypted cfg waits for user to enter password
-  } else if (hasConfig) {
+  const hasCfgHash = applyHashConfig();
+  const hasEncHash = applyEncConfig();
+  loadConfig();
+  if (hasCfgHash) {
+    // old plain text: settings page shown inside applyHashConfig
+  } else if (hasEncHash) {
+    // encrypted: unlock overlay shown, wait for password
+  } else if (memToken) {
     switchPage('write');
   } else {
     switchPage('settings');
