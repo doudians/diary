@@ -1049,16 +1049,17 @@
   }
 
   async function testConnection() {
-    const token = $('settingToken').value.trim();
+    const token = $('settingToken').value.trim() || pendingMigrateToken || memToken;
     const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
     const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
-    if (!token) { showToast('请填写 Token'); return; }
+    if (!token || !owner || !repo) { showToast('请填写完整信息'); return; }
 
-    const tmp = config;
-    config = { token, owner, repo };
+    const tmpToken = memToken;
+    const tmpCfg = config;
+    memToken = token;
+    config = { owner, repo };
     try {
       await ensureDiaryDir();
-      // Try to write a test file then delete it
       const testPath = '/diary/.diary-test';
       const testContent = 'test';
       const putRes = await apiPut(`/contents${testPath}`, {
@@ -1080,7 +1081,8 @@
       else if (msg.includes('404')) msg = '仓库不存在';
       showToast('连接失败: ' + msg);
     }
-    config = tmp;
+    memToken = tmpToken;
+    config = tmpCfg;
   }
 
   function exportConfig() {
