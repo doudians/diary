@@ -457,7 +457,7 @@
       <div class="form-group" id="bookmarkBox" style="display:none;margin-top:12px;">
         <label>专属书签链接（收藏此链接即可跨设备免登录）</label>
         <div class="hint code" id="bookmarkText" style="word-break:break-all;"></div>
-        <div class="hint" style="margin-top:6px;">把上方链接收藏到浏览器书签或微信收藏，换设备时直接打开即可自动登录。链接已加密，需密码解密。</div>
+        <div class="hint" style="margin-top:6px; color: var(--danger);">⚠️ 请勿随意分享此链接，链接包含仓库写入权限。请妥善保管同步密码。</div>
       </div>
 
       <div class="form-group" id="decryptBox" style="display:none;margin-top:12px;">
@@ -569,24 +569,25 @@
   function applyHashConfig() {
     const hash = location.hash;
     if (!hash || !hash.startsWith('#cfg=')) return false;
-    try {
-      const payload = hash.slice(5);
-      const cfg = JSON.parse(base64ToUtf8(payload));
-      if (!cfg.token) return false;
-      config = { token: cfg.token, owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
-      localStorage.setItem(LS_KEY, JSON.stringify(config));
-      history.replaceState(null, '', location.pathname + location.search);
-      return true;
-    } catch(e) {
-      console.error('hash config error', e);
-      return false;
-    }
-  }
+    const payload = hash.slice(5);
 
-  function applyEncConfig() {
-    const hash = location.hash;
-    if (!hash || !hash.startsWith('#enc=')) return false;
-    // Show decrypt UI
+    // 1. Compatibility: old plain-text cfg
+    try {
+      const cfg = JSON.parse(base64ToUtf8(payload));
+      if (cfg.token) {
+        config = { token: cfg.token, owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
+        localStorage.setItem(LS_KEY, JSON.stringify(config));
+        history.replaceState(null, '', location.pathname + location.search);
+        showToast('检测到旧版明文链接，请立即设置同步密码并重新生成加密书签');
+        switchPage('settings');
+        $('settingSyncPwd').focus();
+        return true;
+      }
+    } catch(e) {
+      // Not old plain-text format
+    }
+
+    // 2. New encrypted cfg - show password input
     switchPage('settings');
     $('decryptBox').style.display = 'block';
     $('bookmarkBox').style.display = 'none';
@@ -597,12 +598,12 @@
 
   async function decryptAndLoad() {
     const hash = location.hash;
-    if (!hash || !hash.startsWith('#enc=')) return;
+    if (!hash || !hash.startsWith('#cfg=')) return;
+    const payload = hash.slice(5);
     const pwd = $('decryptPwd').value.trim();
     if (!/^\d{6}$/.test(pwd)) { showToast('请输入6位数字密码'); return; }
     try {
-      const encPayload = hash.slice(5);
-      const cfg = await decryptConfig(encPayload, pwd);
+      const cfg = await decryptConfig(payload, pwd);
       if (!cfg.token) throw new Error('无效配置');
       config = { token: cfg.token, owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
       localStorage.setItem(LS_KEY, JSON.stringify(config));
@@ -611,7 +612,7 @@
       showToast('解密成功，已自动登录');
       switchPage('write');
     } catch(e) {
-      showToast('解密失败: 密码错误或链接已损坏');
+      showToast('解密失败: 请输入同步密码');
     }
   }
 
@@ -1043,7 +1044,7 @@
     if (!/^\d{6}$/.test(pwd)) { showToast('请设置6位数字同步密码'); $('settingSyncPwd').focus(); return; }
     try {
       const payload = await encryptConfig({ token, owner, repo, v: 2 }, pwd);
-      const url = location.origin + location.pathname + '#enc=' + payload;
+      const url = location.origin + location.pathname + '#cfg=' + payload;
       $('bookmarkText').textContent = url;
       $('bookmarkBox').style.display = 'block';
       showToast('加密链接已生成，请收藏到书签');
@@ -1146,14 +1147,11 @@
 
   // Init
   updateOnlineStatus();
-  const encPending = applyEncConfig();
   const hashLoaded = applyHashConfig();
   const hasConfig = loadConfig();
-  if (encPending) {
-    // wait for user to enter password
-  } else if (hashLoaded) {
-    showToast('已通过书签链接自动登录');
-    switchPage('write');
+  if (hashLoaded) {
+    // old plain text migrated inside applyHashConfig
+    // encrypted cfg waits for user to enter password
   } else if (hasConfig) {
     switchPage('write');
   } else {
