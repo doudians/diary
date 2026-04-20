@@ -528,6 +528,7 @@
   const DEFAULT_REPO = 'diary';
 
   const $ = id => document.getElementById(id);
+  const halfWidth = str => str.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   const w = ['周日','周一','周二','周三','周四','周五','周六'];
   const fmtDate = d => `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${w[d.getDay()]}`;
   const fmtDateShort = d => `${d.getMonth()+1}月${d.getDate()}日`;
@@ -631,7 +632,7 @@
     const hash = location.hash;
     if (!hash || !hash.startsWith('#enc=')) return;
     const payload = hash.slice(5);
-    const pwd = $('unlockPwd').value.trim();
+    const pwd = halfWidth($('unlockPwd').value.trim());
     if (!/^\d{6}$/.test(pwd)) {
       $('unlockStatus').textContent = '请输入6位数字密码';
       return;
@@ -670,7 +671,7 @@
 
   async function decryptAndLoad() {
     // Legacy fallback for decryptBox in settings page
-    const text = $('decryptPwd').value.trim();
+    const text = halfWidth($('decryptPwd').value.trim());
     if (!/^\d{6}$/.test(text)) { showToast('请输入6位数字密码'); return; }
     $('unlockPwd').value = text;
     await tryUnlock();
