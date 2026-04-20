@@ -25,10 +25,9 @@
     background: var(--bg);
     color: var(--text);
     line-height: 1.6;
-    overflow: hidden;
   }
   #app {
-    height: 100%;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     max-width: 720px;
@@ -81,6 +80,16 @@
     -webkit-overflow-scrolling: touch;
     position: relative;
   }
+  .content::-webkit-scrollbar {
+    width: 6px;
+  }
+  .content::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .content::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+  }
   .page {
     display: none;
     padding: 20px;
@@ -113,10 +122,6 @@
 
   /* Save bar */
   .save-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
     padding: 10px 20px calc(10px + env(safe-area-inset-bottom));
     background: var(--surface);
     border-top: 1px solid var(--border);
@@ -125,8 +130,7 @@
     align-items: center;
     justify-content: space-between;
     z-index: 20;
-    max-width: 720px;
-    margin: 0 auto;
+    flex-shrink: 0;
   }
   .save-bar .status {
     font-size: 13px;
@@ -302,16 +306,11 @@
 
   /* Nav */
   .nav {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
     display: flex;
     background: var(--surface);
     border-top: 1px solid var(--border);
     z-index: 30;
-    max-width: 720px;
-    margin: 0 auto;
+    flex-shrink: 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
   .nav-item {
@@ -389,7 +388,7 @@
     <div class="page active" id="page-write">
       <div class="write-meta">
         <span id="writeDate"></span>
-        <span style="font-size:11px;color:#bbb;">自动保存到 GitHub</span>
+        <span id="writeModeHint" style="font-size:11px;color:#bbb;">自动保存到 GitHub</span>
       </div>
       <textarea class="write-area" id="writeArea" placeholder="今天发生了什么..."></textarea>
     </div>
@@ -408,6 +407,10 @@
     <!-- Detail -->
     <div class="page" id="page-detail">
       <a href="#" class="back-link" id="backLink">← 返回列表</a>
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-small" id="btnEdit">✏️ 编辑此篇</button>
+        <button class="btn btn-danger btn-small" id="btnDelete">🗑 删除此篇</button>
+      </div>
       <div class="detail-body" id="detailBody"></div>
     </div>
 
@@ -514,6 +517,9 @@
   let currentDate = new Date();
   let isOnline = navigator.onLine;
   let diaryCache = []; // in-memory cache for instant list updates
+  let editMode = null; // { fileName, sha } or null
+  let currentDetailFile = null;
+  let currentDetailSha = null;
 
   function applyHashConfig() {
     const hash = location.hash;
@@ -670,46 +676,70 @@
 
     setSaveState(true);
     setSyncBadge('pending', '同步中...');
-    const fileName = `${fmtFileDate(currentDate)}.md`;
-    const path = `/${DIARY_DIR}/${fileName}`;
-    const timeStr = fmtTime(new Date());
-    const newEntry = `## ${timeStr}\n${text}\n\n`;
 
     try {
       await ensureDiaryDir();
-      let content = `# ${fmtFileDate(currentDate)}\n\n${newEntry}`;
-      let sha = null;
-      const existing = await apiGet(`/contents${path}`);
-      if (existing && existing.content) {
-        sha = existing.sha;
-        const existingText = base64ToUtf8(existing.content);
-        content = existingText.trimEnd() + '\n\n' + newEntry;
-      }
 
-      await apiPut(`/contents${path}`, {
-        message: `diary: ${fileName}`,
-        content: utf8ToBase64(content),
-        ...(sha ? { sha } : {})
-      });
-
-      // Update cache so list shows instantly without re-fetching
-      const cacheEntry = {
-        name: fileName,
-        dateLabel: fmtDateShort(currentDate),
-        weekday: w[currentDate.getDay()],
-        preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '')
-      };
-      const existingIndex = diaryCache.findIndex(d => d.name === fileName);
-      if (existingIndex >= 0) {
-        diaryCache[existingIndex] = cacheEntry;
+      if (editMode) {
+        // Edit mode: overwrite entire file
+        const fileName = editMode.fileName;
+        const path = `/${DIARY_DIR}/${fileName}`;
+        await apiPut(`/contents${path}`, {
+          message: `diary: edit ${fileName}`,
+          content: utf8ToBase64(text),
+          sha: editMode.sha
+        });
+        // Update cache
+        const idx = diaryCache.findIndex(d => d.name === fileName);
+        if (idx >= 0) {
+          diaryCache[idx].preview = text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '');
+        }
+        $('writeArea').value = '';
+        editMode = null;
+        updateWriteModeUI();
+        showToast('修改已保存');
+        setSyncBadge('', '已同步');
+        setTimeout(hideSyncBadge, 3000);
       } else {
-        diaryCache.unshift(cacheEntry);
-      }
+        // New mode: append to today's file
+        const fileName = `${fmtFileDate(currentDate)}.md`;
+        const path = `/${DIARY_DIR}/${fileName}`;
+        const timeStr = fmtTime(new Date());
+        const newEntry = `## ${timeStr}\n${text}\n\n`;
+        let content = `# ${fmtFileDate(currentDate)}\n\n${newEntry}`;
+        let sha = null;
+        const existing = await apiGet(`/contents${path}`);
+        if (existing && existing.content) {
+          sha = existing.sha;
+          const existingText = base64ToUtf8(existing.content);
+          content = existingText.trimEnd() + '\n\n' + newEntry;
+        }
 
-      $('writeArea').value = '';
-      showToast('已保存到 GitHub');
-      setSyncBadge('', '已同步');
-      setTimeout(hideSyncBadge, 3000);
+        await apiPut(`/contents${path}`, {
+          message: `diary: ${fileName}`,
+          content: utf8ToBase64(content),
+          ...(sha ? { sha } : {})
+        });
+
+        // Update cache so list shows instantly without re-fetching
+        const cacheEntry = {
+          name: fileName,
+          dateLabel: fmtDateShort(currentDate),
+          weekday: w[currentDate.getDay()],
+          preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '')
+        };
+        const existingIndex = diaryCache.findIndex(d => d.name === fileName);
+        if (existingIndex >= 0) {
+          diaryCache[existingIndex] = cacheEntry;
+        } else {
+          diaryCache.unshift(cacheEntry);
+        }
+
+        $('writeArea').value = '';
+        showToast('已保存到 GitHub');
+        setSyncBadge('', '已同步');
+        setTimeout(hideSyncBadge, 3000);
+      }
     } catch (err) {
       console.error(err);
       let msg = err.message || '未知错误';
@@ -816,6 +846,8 @@
       if (!detail || !detail.content) { showToast('读取失败'); return; }
       const md = base64ToUtf8(detail.content);
       $('detailBody').innerHTML = marked.parse(md);
+      currentDetailFile = fileName;
+      currentDetailSha = detail.sha;
       switchPage('detail');
     } catch (err) {
       showToast('读取失败: ' + err.message);
@@ -844,6 +876,10 @@
       $('saveBar').style.display = 'flex';
       $('nav').style.display = 'flex';
       $('writeDate').textContent = fmtDate(currentDate);
+      updateWriteModeUI();
+      if (!editMode) {
+        $('writeArea').value = '';
+      }
       setTimeout(() => $('writeArea').focus(), 100);
     } else if (page === 'detail') {
       $('saveBar').style.display = 'none';
@@ -937,6 +973,60 @@
     showToast('链接已生成，请收藏到书签');
   }
 
+  function updateWriteModeUI() {
+    if (editMode) {
+      $('pageTitle').textContent = '编辑日记';
+      $('writeModeHint').textContent = '编辑模式 — 保存将覆盖原文件';
+      $('saveText').textContent = '保存修改';
+    } else {
+      $('pageTitle').textContent = fmtDate(currentDate);
+      $('writeModeHint').textContent = '自动保存到 GitHub';
+      $('saveText').textContent = '保存到云端';
+    }
+  }
+
+  async function startEdit() {
+    if (!currentDetailFile) return;
+    try {
+      const detail = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
+      if (!detail || !detail.content) { showToast('读取失败'); return; }
+      const md = base64ToUtf8(detail.content);
+      editMode = { fileName: currentDetailFile, sha: detail.sha };
+      $('writeArea').value = md;
+      updateWriteModeUI();
+      switchPage('write');
+      showToast('已进入编辑模式');
+    } catch (err) {
+      showToast('读取失败: ' + err.message);
+    }
+  }
+
+  async function deleteDiary() {
+    if (!currentDetailFile || !currentDetailSha) return;
+    if (!confirm('确定要删除这篇日记吗？此操作不可恢复。')) return;
+    try {
+      const res = await fetch(getApiBase() + `/contents/${DIARY_DIR}/${currentDetailFile}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+        body: JSON.stringify({
+          message: `diary: delete ${currentDetailFile}`,
+          sha: currentDetailSha
+        })
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`HTTP ${res.status}: ${txt}`);
+      }
+      diaryCache = diaryCache.filter(d => d.name !== currentDetailFile);
+      currentDetailFile = null;
+      currentDetailSha = null;
+      showToast('已删除');
+      switchPage('list');
+    } catch (err) {
+      showToast('删除失败: ' + err.message);
+    }
+  }
+
   // Events
   $('btnSave').addEventListener('click', saveDiary);
   $('btnSaveSettings').addEventListener('click', () => {
@@ -949,6 +1039,8 @@
   $('btnImport').addEventListener('click', importConfig);
   $('btnDoImport').addEventListener('click', doImport);
   $('btnBookmark').addEventListener('click', generateBookmarkLink);
+  $('btnEdit').addEventListener('click', startEdit);
+  $('btnDelete').addEventListener('click', deleteDiary);
   $('btnClearData').addEventListener('click', () => {
     if (confirm('确定要清除所有本地保存的 Token 和设置吗？')) {
       clearConfig();
