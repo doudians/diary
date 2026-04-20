@@ -653,6 +653,7 @@
   }
 
   async function tryUnlock() {
+    console.log('[Unlock] 函数入口');
     const hash = location.hash;
     // Support new v3 format #enc3=
     let payload = '';
@@ -664,34 +665,50 @@
       switchPage('settings');
       return;
     } else {
+      console.log('[Unlock] 无匹配的 hash 格式，hash=', hash.slice(0,30));
       return;
     }
     try { payload = decodeURIComponent(payload); } catch(e) {}
     const rawPwd = $('unlockPwd').value.trim();
     const pwd = halfWidth(rawPwd);
-    console.log('[Diary] 尝试解锁，密码长度:', pwd.length);
-    console.log('[Diary] 密文片段:', payload.substring(0,20));
+    console.log('[Unlock] 开始解锁，输入密码长度:', pwd.length);
+    console.log('[Unlock] 即将解密的密文片段:', payload.substring(0,20));
     if (!/^\d{6}$/.test(pwd)) {
       $('unlockStatus').textContent = '请输入6位数字密码';
+      console.log('[Unlock] 密码格式校验失败');
       return;
     }
     try {
-      const plain = decryptConfig(payload, pwd);
-      if (!plain) throw new Error('解密失败，返回空');
-      const cfg = JSON.parse(plain);
+      console.log('[Unlock] 调用 decryptConfig...');
+      const decryptedString = decryptConfig(payload, pwd);
+      console.log('[Unlock] 解密原始结果类型:', typeof decryptedString);
+      console.log('[Unlock] 解密结果前50字符:', decryptedString ? decryptedString.substring(0,50) : 'EMPTY');
+      console.log('[Unlock] 是否为有效JSON:', !!(decryptedString && decryptedString.startsWith('{')));
+      if (!decryptedString) throw new Error('解密失败，返回空');
+      const cfg = JSON.parse(decryptedString);
+      console.log('[Unlock] 解析出的 token 存在:', !!cfg.token);
+      console.log('[Unlock] 解析出的 owner:', cfg.owner);
+      console.log('[Unlock] 解析出的 repo:', cfg.repo);
       if (!cfg.token) throw new Error('无效配置');
       memToken = cfg.token;
       memPassword = pwd;
       config = { owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
+      console.log('[Unlock] 内存 Token 已写入:', !!memToken);
+      console.log('[Unlock] 内存 Token 前8位:', memToken ? memToken.substring(0,8) : 'N/A');
       localStorage.setItem(LS_KEY, JSON.stringify(config));
       history.replaceState(null, '', location.pathname + location.search);
       if ($('trustDevice').checked) {
         saveTrustedPassword(pwd);
       }
+      console.log('[Unlock] 即将调用 hideUnlockOverlay / switchPage');
+      console.log('[Unlock] 遮罩层 display 之前:', $('unlockOverlay').style.display);
       hideUnlockOverlay();
+      console.log('[Unlock] 遮罩层 display 之后:', $('unlockOverlay').style.display);
       showToast('解锁成功');
       switchPage('write');
+      console.log('[Unlock] 页面切换完成');
     } catch(e) {
+      console.error('[Unlock] 解锁异常:', e.message, e.stack);
       unlockAttempts++;
       const remaining = Math.max(0, 3 - unlockAttempts);
       if (unlockAttempts >= 3) {
@@ -1268,6 +1285,17 @@
       clearConfig();
     }
   });
+  if ($('btnUnlock')) {
+    $('btnUnlock').addEventListener('click', tryUnlock);
+    console.log('[Diary] btnUnlock 事件已绑定');
+  } else {
+    console.error('[Diary] btnUnlock 元素未找到!');
+  }
+  if ($('unlockPwd')) {
+    $('unlockPwd').addEventListener('keydown', e => {
+      if (e.key === 'Enter') tryUnlock();
+    });
+  }
 
   $('backLink').addEventListener('click', e => {
     e.preventDefault();
