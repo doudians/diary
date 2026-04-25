@@ -404,7 +404,94 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .page-detail ~ .save-bar { display: none; }
+  .page-detail ~ .save-bar,
+  .page-history ~ .save-bar,
+  .page-version ~ .save-bar,
+  .page-diff ~ .save-bar { display: none; }
+
+  /* History */
+  .history-list {
+    list-style: none;
+    padding-bottom: 40px;
+  }
+  .history-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .history-timeline {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 4px;
+  }
+  .history-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+  .history-line {
+    width: 2px;
+    flex: 1;
+    background: #e5e5e5;
+    margin-top: 4px;
+    min-height: 20px;
+  }
+  .history-content {
+    flex: 1;
+  }
+  .history-time {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .history-msg {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  /* Diff */
+  .diff-body {
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  .diff-line {
+    display: flex;
+    padding: 2px 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .diff-line.add {
+    background: #dcfce7;
+  }
+  .diff-line.del {
+    background: #fee2e2;
+  }
+  .diff-line.same {
+    background: transparent;
+  }
+  .diff-marker {
+    width: 24px;
+    flex-shrink: 0;
+    text-align: center;
+    color: #888;
+    user-select: none;
+  }
+  .diff-line.add .diff-marker { color: #16a34a; }
+  .diff-line.del .diff-marker { color: #dc2626; }
+  .diff-text {
+    flex: 1;
+    padding-left: 8px;
+  }
 </style>
 </head>
 <body>
@@ -449,9 +536,43 @@
       <a href="#" class="back-link" id="backLink">← 返回列表</a>
       <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
         <button class="btn btn-secondary btn-small" id="btnEdit">✏️ 编辑此篇</button>
+        <button class="btn btn-secondary btn-small" id="btnHistory">📜 历史版本</button>
         <button class="btn btn-danger btn-small" id="btnDelete">🗑 删除此篇</button>
       </div>
       <div class="detail-body" id="detailBody"></div>
+    </div>
+
+    <!-- History -->
+    <div class="page" id="page-history">
+      <a href="#" class="back-link" id="backLinkHistory">← 返回当前日记</a>
+      <div id="historyTitle" style="font-size:18px;font-weight:600;margin:12px 0 8px;"></div>
+      <div id="historyStatus" style="font-size:12px;color:#888;margin-bottom:12px;"></div>
+      <ul class="history-list" id="historyList"></ul>
+      <div class="empty-state" id="historyEmpty" style="display:none;">
+        <p>这是首版，暂无历史记录</p>
+      </div>
+    </div>
+
+    <!-- Version -->
+    <div class="page" id="page-version">
+      <a href="#" class="back-link" id="backLinkVersion">← 返回历史列表</a>
+      <div id="versionTitle" style="font-size:18px;font-weight:600;margin:12px 0 8px;"></div>
+      <div id="versionMeta" style="font-size:12px;color:#888;margin-bottom:12px;"></div>
+      <div class="detail-body" id="versionBody"></div>
+      <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-small" id="btnDiffPrev">与上一版本对比</button>
+        <button class="btn btn-secondary btn-small" id="btnBackHistory">返回列表</button>
+      </div>
+    </div>
+
+    <!-- Diff -->
+    <div class="page" id="page-diff">
+      <a href="#" class="back-link" id="backLinkDiff">← 返回历史列表</a>
+      <div id="diffTitle" style="font-size:18px;font-weight:600;margin:12px 0 8px;"></div>
+      <div class="diff-body" id="diffBody"></div>
+      <div style="margin-top:16px;">
+        <button class="btn btn-secondary btn-small" id="btnBackHistory2">返回列表</button>
+      </div>
     </div>
 
     <!-- Settings -->
@@ -602,6 +723,10 @@
   let editMode = null; // { fileName, sha } or null
   let currentDetailFile = null;
   let currentDetailSha = null;
+  let historyCache = {}; // commit_sha -> content
+  let historyCommits = []; // array of commit objects
+  let currentHistoryFile = null;
+  let currentVersionSha = null;
 
   // --- CryptoJS v3: deterministic encryption, no random salt ---
   function deriveKeyIV(password) {
@@ -1138,13 +1263,17 @@
       write: { page: 'page-write', nav: 'write', title: fmtDate(currentDate), subtitle: '记录当下的想法' },
       list: { page: 'page-list', nav: 'list', title: '日记列表', subtitle: '' },
       detail: { page: 'page-detail', nav: 'list', title: '日记详情', subtitle: '' },
-      settings: { page: 'page-settings', nav: 'settings', title: '设置', subtitle: 'GitHub 连接配置' }
+      settings: { page: 'page-settings', nav: 'settings', title: '设置', subtitle: 'GitHub 连接配置' },
+      history: { page: 'page-history', nav: 'list', title: '历史版本', subtitle: '' },
+      version: { page: 'page-version', nav: 'list', title: '版本详情', subtitle: '' },
+      diff: { page: 'page-diff', nav: 'list', title: '版本对比', subtitle: '' }
     };
     const m = map[page];
     if (!m) return;
 
     $(m.page).classList.add('active');
-    document.querySelector(`.nav-item[data-page="${m.nav}"]`).classList.add('active');
+    const navBtn = document.querySelector(`.nav-item[data-page="${m.nav}"]`);
+    if (navBtn) navBtn.classList.add('active');
     $('pageTitle').textContent = m.title;
     $('pageSubtitle').textContent = m.subtitle;
 
@@ -1157,7 +1286,7 @@
         $('writeArea').value = '';
       }
       setTimeout(() => $('writeArea').focus(), 100);
-    } else if (page === 'detail') {
+    } else if (page === 'detail' || page === 'history' || page === 'version' || page === 'diff') {
       $('saveBar').style.display = 'none';
       $('nav').style.display = 'none';
     } else {
@@ -1166,6 +1295,153 @@
     }
 
     if (page === 'list') loadDiaryList();
+  }
+
+  // --- Git History ---
+  async function loadHistory(fileName) {
+    currentHistoryFile = fileName;
+    $('historyTitle').textContent = fileName.replace('.md', '') + ' 的历史版本';
+    $('historyList').innerHTML = '';
+    $('historyEmpty').style.display = 'none';
+    $('historyStatus').textContent = '正在加载提交历史...';
+    switchPage('history');
+    try {
+      const commits = await apiGet(`/commits?path=${DIARY_DIR}/${fileName}&per_page=20`);
+      if (!commits || !Array.isArray(commits)) {
+        $('historyStatus').textContent = '暂无提交记录';
+        return;
+      }
+      historyCommits = commits;
+      if (commits.length <= 1) {
+        $('historyEmpty').style.display = 'block';
+        $('historyStatus').textContent = '这是首版，暂无历史记录';
+        return;
+      }
+      $('historyList').innerHTML = '';
+      commits.forEach((c, idx) => {
+        const date = new Date(c.commit.author.date);
+        const timeStr = `${date.getMonth()+1}月${date.getDate()}日 ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+        const li = document.createElement('li');
+        li.className = 'history-item';
+        li.innerHTML = `
+          <div class="history-timeline">
+            <div class="history-dot"></div>
+            ${idx < commits.length - 1 ? '<div class="history-line"></div>' : ''}
+          </div>
+          <div class="history-content">
+            <div class="history-time">${timeStr}</div>
+            <div class="history-msg">${escapeHtml(c.commit.message)}</div>
+          </div>
+          <button class="btn btn-secondary btn-small" data-sha="${c.sha}" data-idx="${idx}">查看</button>
+        `;
+        li.querySelector('button').addEventListener('click', () => showVersion(fileName, c.sha, idx));
+        $('historyList').appendChild(li);
+      });
+      $('historyStatus').textContent = `共 ${commits.length} 个版本`;
+    } catch (err) {
+      console.error('[History] 加载失败:', err);
+      let msg = err.message || '';
+      if (msg.includes('404')) msg = '未找到提交记录';
+      else if (msg.includes('401') || msg.includes('403')) msg = 'Token 权限不足，无法读取提交历史';
+      $('historyStatus').textContent = '加载失败: ' + msg;
+      showToast('加载失败: ' + msg);
+    }
+  }
+
+  async function loadVersionContent(fileName, sha) {
+    if (historyCache[sha]) return historyCache[sha];
+    try {
+      const detail = await apiGet(`/contents/${DIARY_DIR}/${fileName}?ref=${sha}`);
+      if (detail && detail.content) {
+        const text = base64ToUtf8(detail.content);
+        historyCache[sha] = text;
+        return text;
+      }
+    } catch (err) {
+      console.error('[Version] 加载失败:', err);
+      showToast('该版本文件已不存在');
+    }
+    return null;
+  }
+
+  async function showVersion(fileName, sha, index) {
+    currentVersionSha = sha;
+    const text = await loadVersionContent(fileName, sha);
+    if (text === null) return;
+    const commit = historyCommits[index];
+    const date = new Date(commit.commit.author.date);
+    const timeStr = `${date.getMonth()+1}月${date.getDate()}日 ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
+    $('versionTitle').textContent = fileName.replace('.md', '') + ' 的版本';
+    $('versionMeta').textContent = `${timeStr} — ${escapeHtml(commit.commit.message)}`;
+    $('versionBody').innerHTML = marked.parse(text);
+    switchPage('version');
+    // Bind diff button
+    const btnDiff = $('btnDiffPrev');
+    const newBtn = btnDiff.cloneNode(true);
+    btnDiff.parentNode.replaceChild(newBtn, btnDiff);
+    if (index < historyCommits.length - 1) {
+      const prevSha = historyCommits[index + 1].sha;
+      newBtn.style.display = 'inline-block';
+      newBtn.addEventListener('click', () => showDiff(fileName, prevSha, sha));
+    } else {
+      newBtn.style.display = 'none';
+    }
+  }
+
+  async function showDiff(fileName, oldSha, newSha) {
+    const [oldText, newText] = await Promise.all([
+      loadVersionContent(fileName, oldSha),
+      loadVersionContent(fileName, newSha)
+    ]);
+    if (oldText === null || newText === null) return;
+    const oldCommit = historyCommits.find(c => c.sha === oldSha);
+    const newCommit = historyCommits.find(c => c.sha === newSha);
+    const oldDate = oldCommit ? fmtDiffDate(new Date(oldCommit.commit.author.date)) : '旧版本';
+    const newDate = newCommit ? fmtDiffDate(new Date(newCommit.commit.author.date)) : '新版本';
+    $('diffTitle').textContent = `版本对比：${oldDate} → ${newDate}`;
+    $('diffBody').innerHTML = renderDiff(oldText, newText);
+    switchPage('diff');
+  }
+
+  function fmtDiffDate(d) {
+    return `${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  }
+
+  function escapeHtml(str) {
+    return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function renderDiff(oldText, newText) {
+    const oldLines = oldText.split('\n');
+    const newLines = newText.split('\n');
+    let i = 0, j = 0;
+    const lines = [];
+    let oldLineNum = 1, newLineNum = 1;
+    while (i < oldLines.length || j < newLines.length) {
+      if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+        lines.push({ type: 'same', oldNum: oldLineNum, newNum: newLineNum, text: oldLines[i] });
+        i++; j++; oldLineNum++; newLineNum++;
+      } else if (j < newLines.length && (i >= oldLines.length || oldLines[i] !== newLines[j])) {
+        // Peek ahead: if oldLines[i+1] === newLines[j], treat current old as deletion
+        if (i + 1 < oldLines.length && oldLines[i+1] === newLines[j]) {
+          lines.push({ type: 'del', oldNum: oldLineNum, newNum: '', text: oldLines[i] });
+          i++; oldLineNum++;
+        } else {
+          lines.push({ type: 'add', oldNum: '', newNum: newLineNum, text: newLines[j] });
+          j++; newLineNum++;
+        }
+      } else {
+        lines.push({ type: 'del', oldNum: oldLineNum, newNum: '', text: oldLines[i] });
+        i++; oldLineNum++;
+      }
+    }
+    let html = '';
+    for (const line of lines) {
+      const marker = line.type === 'add' ? '+' : (line.type === 'del' ? '-' : '');
+      const num = line.type === 'add' ? line.newNum : (line.type === 'del' ? line.oldNum : line.newNum);
+      html += `<div class="diff-line ${line.type}"><span class="diff-marker">${marker}</span><span style="width:36px;text-align:right;color:#999;flex-shrink:0;padding-right:8px;">${num}</span><span class="diff-text">${escapeHtml(line.text)}</span></div>`;
+    }
+    return html;
   }
 
   async function testConnection() {
@@ -1341,6 +1617,9 @@
   $('btnBookmark').addEventListener('click', generateBookmarkLink);
   $('btnDecrypt').addEventListener('click', decryptAndLoad);
   $('btnEdit').addEventListener('click', startEdit);
+  $('btnHistory').addEventListener('click', () => {
+    if (currentDetailFile) loadHistory(currentDetailFile);
+  });
   $('btnDelete').addEventListener('click', deleteDiary);
   $('btnClearData').addEventListener('click', () => {
     if (confirm('确定要清除所有本地保存的 Token 和设置吗？')) {
@@ -1363,6 +1642,30 @@
     e.preventDefault();
     switchPage('list');
   });
+  if ($('backLinkHistory')) {
+    $('backLinkHistory').addEventListener('click', e => {
+      e.preventDefault();
+      switchPage('detail');
+    });
+  }
+  if ($('backLinkVersion')) {
+    $('backLinkVersion').addEventListener('click', e => {
+      e.preventDefault();
+      switchPage('history');
+    });
+  }
+  if ($('btnBackHistory')) {
+    $('btnBackHistory').addEventListener('click', () => switchPage('history'));
+  }
+  if ($('backLinkDiff')) {
+    $('backLinkDiff').addEventListener('click', e => {
+      e.preventDefault();
+      switchPage('history');
+    });
+  }
+  if ($('btnBackHistory2')) {
+    $('btnBackHistory2').addEventListener('click', () => switchPage('history'));
+  }
   if ($('listSearch')) {
     $('listSearch').addEventListener('input', filterDiaryList);
   }
