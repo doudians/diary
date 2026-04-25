@@ -214,6 +214,41 @@
     opacity: 0.3;
   }
 
+  /* Search */
+  .search-box {
+    position: relative;
+    margin-bottom: 12px;
+  }
+  .search-box input {
+    width: 100%;
+    padding: 10px 36px 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    background: var(--bg);
+    outline: none;
+    -webkit-appearance: none;
+  }
+  .search-box input:focus {
+    border-color: var(--accent);
+    background: var(--surface);
+  }
+  .search-clear {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 14px;
+    color: #bbb;
+    cursor: pointer;
+    display: none;
+    padding: 4px;
+  }
+  .search-clear.show {
+    display: block;
+  }
+
   /* Detail */
   .detail-body {
     font-size: 16px;
@@ -396,6 +431,10 @@
 
     <!-- List -->
     <div class="page" id="page-list">
+      <div class="search-box">
+        <input type="text" id="listSearch" placeholder="搜索日记内容..." autocomplete="off">
+        <span class="search-clear" id="searchClear">✕</span>
+      </div>
       <div id="listStatus" style="font-size:12px;color:#888;margin-bottom:10px;"></div>
       <ul class="diary-list" id="diaryList"></ul>
       <div class="empty-state" id="listEmpty" style="display:none;">
@@ -1053,6 +1092,29 @@
     }
   }
 
+  function filterDiaryList() {
+    const keyword = $('listSearch').value.trim().toLowerCase();
+    if (!keyword) {
+      renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇日记`);
+      $('searchClear').classList.remove('show');
+      return;
+    }
+    $('searchClear').classList.add('show');
+    const filtered = diaryCache.filter(item =>
+      item.name.toLowerCase().includes(keyword) ||
+      item.dateLabel.toLowerCase().includes(keyword) ||
+      item.weekday.toLowerCase().includes(keyword) ||
+      item.preview.toLowerCase().includes(keyword)
+    );
+    if (filtered.length === 0) {
+      $('diaryList').innerHTML = '';
+      $('listEmpty').style.display = 'block';
+      $('listStatus').textContent = `未找到包含「${$('listSearch').value.trim()}」的日记`;
+    } else {
+      renderDiaryList(filtered, `找到 ${filtered.length} 篇匹配「${$('listSearch').value.trim()}」的日记`);
+    }
+  }
+
   async function showDetail(fileName) {
     if (!config) return;
     try {
@@ -1301,6 +1363,16 @@
     e.preventDefault();
     switchPage('list');
   });
+  if ($('listSearch')) {
+    $('listSearch').addEventListener('input', filterDiaryList);
+  }
+  if ($('searchClear')) {
+    $('searchClear').addEventListener('click', () => {
+      $('listSearch').value = '';
+      filterDiaryList();
+      $('listSearch').focus();
+    });
+  }
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => switchPage(btn.dataset.page));
   });
