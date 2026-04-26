@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Auto-tag diary entries based on keyword matching."""
 
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,84 +13,56 @@ except ImportError:
     raise SystemExit(1)
 
 DIARY_DIR = Path("diary")
+RULES_PATH = Path(__file__).with_name("tag_rules.json")
 
-RULES = [
-    {
-        "tag": "#工作",
-        "keywords": [
-            "加班", "项目", "会议", "汇报", "领导", "处室", "大队",
-            "信控", "无人机", "智能体", "方案", "推进", "落实", "调研",
-            "验收", "招标", "采购", "预算", "经费", "批示", "请示",
-            "报告", "值班", "执勤", "部署", "排查", "整治", "专项行动",
-        ],
-    },
-    {
-        "tag": "#阅读",
-        "keywords": ["读完", "看了", "阅读", "书籍", "书名", "作者", "小说", "散文", "论文", "报告文学"],
-        "regex": [r"《([^》]+)》"],
-    },
-    {
-        "tag": "#生活",
-        "keywords": [
-            "雪宝", "老婆", "家人", "爸妈", "吃饭", "散步", "逛街",
-            "电影", "周末", "假期", "旅行", "宅", "做饭", "买菜", "家务",
-        ],
-    },
-    {
-        "tag": "#运动",
-        "keywords": [
-            "锻炼", "健身", "跑步", "练腿", "深蹲", "俯卧撑",
-            "游泳", "打球", "操场", "体能", "训练",
-        ],
-    },
-    {
-        "tag": "#情绪",
-        "keywords": [
-            "焦虑", "情绪", "疲惫", "调整", "冥想", "反思", "感悟",
-            "心得", "体会", "思考", "复盘", "总结", "成长", "阵痛",
-        ],
-    },
-    {
-        "tag": "#技术",
-        "keywords": [
-            "代码", "编程", "API", "GitHub", "Docker", "WSL", "模型",
-            "大模型", "AI", "算法", "部署", "服务器", "数据库", "前端", "后端",
-        ],
-    },
-    {
-        "tag": "#人际",
-        "keywords": [
-            "沟通", "交流", "聊天", "吐槽", "饭局", "聚餐", "请客",
-            "送礼", "关系", "人脉", "人情", "面子", "尊重", "分寸",
-        ],
-    },
-]
+
+def load_rules() -> list[dict]:
+    """Load tagging rules from JSON file."""
+    if RULES_PATH.exists():
+        data = json.loads(RULES_PATH.read_text(encoding="utf-8"))
+        return data.get("rules", [])
+    return []
+
+
+RULES = load_rules()
 
 
 def extract_tags(content: str) -> list[str]:
-    """Return matched tags based on content text."""
-    tags: set[str] = set()
+    """Return matched tags based on content text, with exclude_from handling."""
     text = content.lower()
+    matched_rules: list[dict] = []
 
     for rule in RULES:
         matched = False
-
         # Keyword matching
         if "keywords" in rule:
             for kw in rule["keywords"]:
                 if kw in text:
                     matched = True
                     break
-
         # Regex matching
         if not matched and "regex" in rule:
             for pattern in rule["regex"]:
                 if re.search(pattern, content):
                     matched = True
                     break
-
         if matched:
-            tags.add(rule["tag"])
+            matched_rules.append(rule)
+
+    # Build tag set and check exclusions
+    tags: set[str] = set()
+    for rule in matched_rules:
+        tag = rule["tag"]
+        excludes = rule.get("exclude_from", [])
+        # If this tag excludes another, check if that other tag is also matched
+        if excludes:
+            excluded_tags = set(excludes)
+            other_matched = {r["tag"] for r in matched_rules if r["tag"] != tag}
+            # Only keep this tag if none of its excluded tags are matched
+            if not excluded_tags & other_matched:
+                tags.add(tag)
+        else:
+            tags.add(tag)
 
     return sorted(tags)
 
@@ -110,19 +83,30 @@ def process_file(filepath: Path) -> bool:
             except yaml.YAMLError:
                 pass
 
-    # Extract tags from body
+    # Skip if manually edited
+    if frontmatter.get("manual_edited"):
+        print(f"Skip (manual_edited): {filepath.name}")
+        return False
+
+    # Extract auto tags from body
     auto_tags = extract_tags(body)
     if not auto_tags:
         return False
 
-    # Merge with existing tags
+    # Merge tags: keep existing tags, append auto tags
     existing_tags = frontmatter.get("tags", [])
     if isinstance(existing_tags, str):
         existing_tags = [existing_tags]
     elif not isinstance(existing_tags, list):
         existing_tags = []
 
-    merged_tags = list(dict.fromkeys(existing_tags + auto_tags))
+    # Separate system tags and user-defined tags
+    system_tags = {r["tag"] for r in RULES}
+    user_tags = [t for t in existing_tags if t not in system_tags]
+    sys_tags = [t for t in existing_tags if t in system_tags]
+
+    merged_sys = list(dict.fromkeys(sys_tags + auto_tags))
+    merged_tags = list(dict.fromkeys(merged_sys + user_tags))
 
     if set(merged_tags) == set(existing_tags):
         return False

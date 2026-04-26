@@ -417,6 +417,9 @@
     margin-bottom: 12px;
   }
   .tag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 2px 10px;
     border-radius: 12px;
     font-size: 12px;
@@ -432,6 +435,39 @@
     background: #f5f5f5;
     color: #888;
   }
+  .tag-del {
+    cursor: pointer;
+    font-size: 11px;
+    opacity: 0.6;
+    padding: 0 2px;
+  }
+  .tag-del:hover { opacity: 1; color: #dc2626; }
+  .tag-add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px dashed #ccc;
+    background: transparent;
+    color: #888;
+    font-size: 16px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .tag-add:hover { border-color: var(--accent); color: var(--accent); }
+  .tag-save {
+    margin-left: auto;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .tag-save:disabled { background: #ccc; cursor: not-allowed; }
 
   /* History */
   .history-list {
@@ -563,6 +599,7 @@
         <button class="btn btn-secondary btn-small" id="btnHistory">📜 历史版本</button>
         <button class="btn btn-danger btn-small" id="btnDelete">🗑 删除此篇</button>
       </div>
+      <div id="detailTags" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px;"></div>
       <div class="detail-body" id="detailBody"></div>
     </div>
 
@@ -747,6 +784,8 @@
   let editMode = null; // { fileName, sha } or null
   let currentDetailFile = null;
   let currentDetailSha = null;
+  let currentDetailTags = []; // in-memory tags for editing
+  let currentDetailFrontmatter = {}; // in-memory frontmatter
   let historyCache = {}; // commit_sha -> content
   let historyCommits = []; // array of commit objects
   let currentHistoryFile = null;
@@ -1326,20 +1365,100 @@
       const md = base64ToUtf8(detail.content);
       const parsed = parseFrontmatter(md);
       $('detailBody').innerHTML = marked.parse(parsed.body);
-      const tagsHtml = renderTags(parsed.frontmatter.tags);
-      // Insert tags before detail body
-      const existingTags = $('detailBody').previousElementSibling;
-      if (existingTags && existingTags.classList.contains('tag-row')) {
-        existingTags.remove();
-      }
-      if (tagsHtml) {
-        $('detailBody').insertAdjacentHTML('beforebegin', tagsHtml);
-      }
       currentDetailFile = fileName;
       currentDetailSha = detail.sha;
+      currentDetailTags = Array.isArray(parsed.frontmatter.tags) ? [...parsed.frontmatter.tags] : [];
+      currentDetailFrontmatter = parsed.frontmatter;
+      renderEditableTags();
       switchPage('detail');
     } catch (err) {
       showToast('读取失败: ' + err.message);
+    }
+  }
+
+  function renderEditableTags() {
+    const container = $('detailTags');
+    let html = '';
+    for (const tag of currentDetailTags) {
+      html += `<span class="tag-pill">${escapeHtml(tag)}<span class="tag-del" data-tag="${escapeHtml(tag)}">✕</span></span>`;
+    }
+    html += `<button class="tag-add" id="btnAddTag">+</button>`;
+    html += `<button class="tag-save" id="btnSaveTags">保存标签</button>`;
+    container.innerHTML = html;
+    // Bind events
+    container.querySelectorAll('.tag-del').forEach(el => {
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        removeTag(el.dataset.tag);
+      });
+    });
+    const btnAdd = container.querySelector('#btnAddTag');
+    if (btnAdd) btnAdd.addEventListener('click', addTagPrompt);
+    const btnSave = container.querySelector('#btnSaveTags');
+    if (btnSave) btnSave.addEventListener('click', saveTagsToGitHub);
+  }
+
+  function removeTag(tagName) {
+    currentDetailTags = currentDetailTags.filter(t => t !== tagName);
+    renderEditableTags();
+  }
+
+  function addTagPrompt() {
+    const raw = prompt('输入新标签，如 #育儿');
+    if (!raw) return;
+    const tag = raw.trim();
+    if (!/^#[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(tag)) {
+      showToast('标签格式错误，必须以#开头，后接中文/字母/数字');
+      return;
+    }
+    if (currentDetailTags.includes(tag)) {
+      showToast('标签已存在');
+      return;
+    }
+    currentDetailTags.push(tag);
+    renderEditableTags();
+  }
+
+  async function saveTagsToGitHub() {
+    if (!currentDetailFile || !currentDetailSha) { showToast('无当前文件'); return; }
+    try {
+      const detail = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
+      if (!detail || !detail.content) { showToast('读取失败'); return; }
+      const md = base64ToUtf8(detail.content);
+      const parsed = parseFrontmatter(md);
+      const fm = parsed.frontmatter || {};
+      fm.tags = [...currentDetailTags];
+      fm.manual_edited = true;
+      delete fm.auto_tagged;
+      delete fm.auto_tagged_at;
+      // Rebuild frontmatter YAML manually
+      let fmYaml = '';
+      for (const [key, val] of Object.entries(fm)) {
+        if (Array.isArray(val)) {
+          fmYaml += `${key}:\n`;
+          for (const v of val) {
+            fmYaml += `  - '${v}'\n`;
+          }
+        } else if (typeof val === 'boolean') {
+          fmYaml += `${key}: ${val}\n`;
+        } else {
+          fmYaml += `${key}: '${val}'\n`;
+        }
+      }
+      const content = `---\n${fmYaml}---\n${parsed.body}`;
+      await apiPut(`/contents/${DIARY_DIR}/${currentDetailFile}`, {
+        message: `diary: manual tag edit ${currentDetailFile}`,
+        content: utf8ToBase64(content),
+        sha: detail.sha
+      });
+      currentDetailSha = detail.sha; // will be updated after push, but we need fresh sha
+      showToast('标签已保存');
+      // Refresh to get new sha
+      const refreshed = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
+      if (refreshed) currentDetailSha = refreshed.sha;
+    } catch (err) {
+      console.error('[Tags] 保存失败:', err);
+      showToast('保存失败: ' + err.message);
     }
   }
 
