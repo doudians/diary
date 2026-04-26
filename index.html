@@ -409,6 +409,30 @@
   .page-version ~ .save-bar,
   .page-diff ~ .save-bar { display: none; }
 
+  /* Tags */
+  .tag-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .tag-pill {
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    background: #f0f7ff;
+    color: #2563eb;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .tag-more {
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    background: #f5f5f5;
+    color: #888;
+  }
+
   /* History */
   .history-list {
     list-style: none;
@@ -1041,6 +1065,52 @@
     return new TextDecoder().decode(bytes);
   }
 
+  function parseFrontmatter(mdText) {
+    const result = { frontmatter: {}, body: mdText };
+    if (!mdText.startsWith('---')) return result;
+    const parts = mdText.split('---');
+    if (parts.length < 3) return result;
+    try {
+      const yamlText = parts[1].trim();
+      const lines = yamlText.split('\n');
+      const fm = {};
+      let currentKey = null;
+      for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+        const match = line.match(/^(\w+):\s*(.*)$/);
+        if (match) {
+          currentKey = match[1];
+          let val = match[2].trim();
+          if (val.startsWith('-')) {
+            fm[currentKey] = [];
+            val = val.replace(/^-\s*/, '').trim();
+            if (val) fm[currentKey].push(val.replace(/^['"]|['"]$/g, ''));
+          } else {
+            fm[currentKey] = val.replace(/^['"]|['"]$/g, '');
+          }
+        } else if (line.startsWith('-') && currentKey) {
+          let val = line.replace(/^-\s*/, '').trim();
+          if (!Array.isArray(fm[currentKey])) fm[currentKey] = [];
+          fm[currentKey].push(val.replace(/^['"]|['"]$/g, ''));
+        }
+      }
+      result.frontmatter = fm;
+      result.frontmatterRaw = parts[1].trim();
+      result.body = parts.slice(2).join('---').trimStart();
+    } catch(e) {
+      console.error('Frontmatter parse error:', e);
+    }
+    return result;
+  }
+
+  function renderTags(tags, max) {
+    if (!tags || !tags.length) return '';
+    const show = max ? tags.slice(0, max) : tags;
+    const more = max && tags.length > max ? `<span class="tag-more">+${tags.length - max}</span>` : '';
+    return `<div class="tag-row">${show.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}${more}</div>`;
+  }
+
   async function ensureDiaryDir() {
     // GitHub creates directories implicitly via file paths, but let's verify repo exists
     const repo = await apiGet('');
@@ -1059,12 +1129,16 @@
       await ensureDiaryDir();
 
       if (editMode) {
-        // Edit mode: overwrite entire file
+        // Edit mode: overwrite entire file, preserve frontmatter
         const fileName = editMode.fileName;
         const path = `/${DIARY_DIR}/${fileName}`;
+        let content = text;
+        if (editMode.frontmatterRaw) {
+          content = `---\n${editMode.frontmatterRaw}\n---\n${text}`;
+        }
         await apiPut(`/contents${path}`, {
           message: `diary: edit ${fileName}`,
-          content: utf8ToBase64(text),
+          content: utf8ToBase64(content),
           sha: editMode.sha
         });
         // Update cache
@@ -1178,16 +1252,19 @@
         }
 
         let preview = '...';
+        let tags = [];
         try {
           const detail = await apiGet(`/contents/${DIARY_DIR}/${f.name}`);
           if (detail && detail.content) {
             const full = base64ToUtf8(detail.content);
-            preview = full.replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}\s*/g, ' ').trim();
+            const parsed = parseFrontmatter(full);
+            preview = parsed.body.replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}\s*/g, ' ').trim();
             preview = preview.slice(0, 60).replace(/\n/g, ' ') + (preview.length > 60 ? '...' : '');
+            tags = parsed.frontmatter.tags || [];
           }
         } catch(e) {}
 
-        diaryCache.push({ name: f.name, dateLabel, weekday: wday, preview });
+        diaryCache.push({ name: f.name, dateLabel, weekday: wday, preview, tags });
       }
 
       renderDiaryList(diaryCache, `共 ${mdFiles.length} 篇日记（来自 GitHub）`);
@@ -1211,7 +1288,8 @@
     for (const item of items) {
       const li = document.createElement('li');
       li.className = 'diary-item';
-      li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div><div class="preview">${item.preview}</div>`;
+      const tagsHtml = renderTags(item.tags, 3);
+      li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${item.preview}</div>`;
       li.addEventListener('click', () => showDetail(item.name));
       $('diaryList').appendChild(li);
     }
@@ -1246,7 +1324,17 @@
       const detail = await apiGet(`/contents/${DIARY_DIR}/${fileName}`);
       if (!detail || !detail.content) { showToast('读取失败'); return; }
       const md = base64ToUtf8(detail.content);
-      $('detailBody').innerHTML = marked.parse(md);
+      const parsed = parseFrontmatter(md);
+      $('detailBody').innerHTML = marked.parse(parsed.body);
+      const tagsHtml = renderTags(parsed.frontmatter.tags);
+      // Insert tags before detail body
+      const existingTags = $('detailBody').previousElementSibling;
+      if (existingTags && existingTags.classList.contains('tag-row')) {
+        existingTags.remove();
+      }
+      if (tagsHtml) {
+        $('detailBody').insertAdjacentHTML('beforebegin', tagsHtml);
+      }
       currentDetailFile = fileName;
       currentDetailSha = detail.sha;
       switchPage('detail');
@@ -1567,8 +1655,9 @@
       const detail = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
       if (!detail || !detail.content) { showToast('读取失败'); return; }
       const md = base64ToUtf8(detail.content);
-      editMode = { fileName: currentDetailFile, sha: detail.sha };
-      $('writeArea').value = md;
+      const parsed = parseFrontmatter(md);
+      editMode = { fileName: currentDetailFile, sha: detail.sha, frontmatterRaw: parsed.frontmatterRaw };
+      $('writeArea').value = parsed.body;
       updateWriteModeUI();
       switchPage('write');
       showToast('已进入编辑模式');
