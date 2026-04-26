@@ -267,6 +267,38 @@
     margin: 20px 0 8px;
   }
   .detail-body p { margin-bottom: 12px; }
+
+  /* Entry-level rendering */
+  .entry {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .entry:last-child {
+    border-bottom: none;
+  }
+  .entry-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .entry-time {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .entry-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .entry-body {
+    font-size: 16px;
+    line-height: 1.8;
+  }
+  .entry-body p { margin-bottom: 10px; }
   .back-link {
     display: inline-flex;
     align-items: center;
@@ -851,6 +883,14 @@
   console.log('[Diary] 检测到 enc3:', !!location.hash.match(/enc3=/));
   console.log('[Diary] 内存中 Token 是否存在:', !!window.__token);
   const w = ['周日','周一','周二','周三','周四','周五','周六'];
+  // 日记日期以06:00为界，凌晨6点前归属前一天
+  function getDiaryDate(d) {
+    const date = new Date(d);
+    if (date.getHours() < 6) {
+      date.setDate(date.getDate() - 1);
+    }
+    return date;
+  }
   const fmtDate = d => `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${w[d.getDay()]}`;
   const fmtDateShort = d => `${d.getMonth()+1}月${d.getDate()}日`;
   const fmtFileDate = d => {
@@ -870,15 +910,15 @@
   let memPassword = null; // Session password in memory
   let pendingMigrateToken = null; // For old plain-text #cfg migration
   let unlockAttempts = 0;
-  let currentDate = new Date();
+  let currentDate = getDiaryDate(new Date());
   let isOnline = navigator.onLine;
   let diaryCache = []; // in-memory cache for instant list updates
   let editMode = null; // { fileName, sha, frontmatterRaw } or null
   let writePageTags = []; // tags selected on write page
   let currentDetailFile = null;
   let currentDetailSha = null;
-  let currentDetailTags = []; // in-memory tags for editing
-  let currentDetailFrontmatter = {}; // in-memory frontmatter
+  let currentDetailTags = []; // deprecated: entry-level tags now
+  let currentDetailFrontmatter = {}; // deprecated: entry-level tags now
   let historyCache = {}; // commit_sha -> content
   let historyCommits = []; // array of commit objects
   let currentHistoryFile = null;
@@ -1237,6 +1277,75 @@
     return result;
   }
 
+  // --- Entry-level tags ---
+  // Parse tags from a time header like "## 20:15 #工作 #人际"
+  function parseEntryTags(line) {
+    const match = line.match(/^##\s+(\d{2}:\d{2})(.*)$/);
+    if (!match) return null;
+    const rest = match[2].trim();
+    const tags = [];
+    const tagMatches = rest.match(/#[^\s#]+/g);
+    if (tagMatches) {
+      for (const t of tagMatches) tags.push(t);
+    }
+    return { time: match[1], tags, raw: line };
+  }
+
+  // Strip tags from header, return clean "## HH:MM"
+  function stripTagsFromHeader(line) {
+    const info = parseEntryTags(line);
+    if (!info) return line;
+    return `## ${info.time}`;
+  }
+
+  // Parse markdown into entries array { time, tags, body }
+  function parseEntries(mdText) {
+    const parsed = parseFrontmatter(mdText);
+    const body = parsed.body;
+    const lines = body.split('\n');
+    const entries = [];
+    let currentEntry = null;
+    for (const line of lines) {
+      const entryInfo = parseEntryTags(line);
+      if (entryInfo) {
+        if (currentEntry) entries.push(currentEntry);
+        currentEntry = { time: entryInfo.time, tags: entryInfo.tags, bodyLines: [] };
+      } else if (currentEntry) {
+        currentEntry.bodyLines.push(line);
+      }
+    }
+    if (currentEntry) entries.push(currentEntry);
+    // Fallback: if no entry-level tags but frontmatter has tags, apply to first entry
+    const fmTags = parsed.frontmatter.tags || [];
+    if (entries.length > 0 && entries[0].tags.length === 0 && fmTags.length > 0) {
+      entries[0].tags = [...fmTags];
+    }
+    return { entries, frontmatter: parsed.frontmatter, frontmatterRaw: parsed.frontmatterRaw };
+  }
+
+  // Render entries to HTML for detail page
+  function renderEntriesHtml(parsed) {
+    if (parsed.entries.length === 0) {
+      return marked.parse(parsed.body || '');
+    }
+    let html = '';
+    for (const entry of parsed.entries) {
+      const bodyMd = entry.bodyLines.join('\n').trim();
+      const bodyHtml = bodyMd ? marked.parse(bodyMd) : '';
+      const tagsHtml = entry.tags.length > 0
+        ? `<div class="entry-tags">${entry.tags.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
+      html += `<div class="entry">
+        <div class="entry-header">
+          <span class="entry-time">${escapeHtml(entry.time)}</span>
+        </div>
+        ${tagsHtml}
+        <div class="entry-body">${bodyHtml}</div>
+      </div>`;
+    }
+    return html;
+  }
+
   function renderTags(tags, max) {
     if (!tags || !tags.length) return '';
     const show = max ? tags.slice(0, max) : tags;
@@ -1325,26 +1434,12 @@
       await ensureDiaryDir();
 
       if (editMode) {
-        // Edit mode: overwrite entire file, preserve frontmatter, update tags
+        // Edit mode: overwrite entire file, preserve frontmatter as-is
         const fileName = editMode.fileName;
         const path = `/${DIARY_DIR}/${fileName}`;
         let content = text;
         if (editMode.frontmatterRaw) {
-          const fm = parseFrontmatter(`---\n${editMode.frontmatterRaw}\n---\n`).frontmatter;
-          if (writePageTags.length > 0) fm.tags = writePageTags;
-          else delete fm.tags;
-          let fmYaml = '';
-          for (const [key, val] of Object.entries(fm)) {
-            if (Array.isArray(val)) {
-              fmYaml += `${key}:\n`;
-              for (const v of val) fmYaml += `  - '${v}'\n`;
-            } else if (typeof val === 'boolean') {
-              fmYaml += `${key}: ${val}\n`;
-            } else {
-              fmYaml += `${key}: '${val}'\n`;
-            }
-          }
-          content = `---\n${fmYaml}---\n${text}`;
+          content = `---\n${editMode.frontmatterRaw}\n---\n${text}`;
         }
         await apiPut(`/contents${path}`, {
           message: `diary: edit ${fileName}`,
@@ -1363,11 +1458,12 @@
         setSyncBadge('', '已同步');
         setTimeout(hideSyncBadge, 3000);
       } else {
-        // New mode: append to today's file
+        // New mode: append to today's file with entry-level tags
         const fileName = `${fmtFileDate(currentDate)}.md`;
         const path = `/${DIARY_DIR}/${fileName}`;
         const timeStr = fmtTime(new Date());
-        const newEntry = `## ${timeStr}\n${text}\n\n`;
+        const tagStr = writePageTags.length > 0 ? ' ' + writePageTags.join(' ') : '';
+        const newEntry = `## ${timeStr}${tagStr}\n${text}\n\n`;
         let content = `# ${fmtFileDate(currentDate)}\n\n${newEntry}`;
         let sha = null;
         let frontmatterRaw = '';
@@ -1378,16 +1474,10 @@
           const parsed = parseFrontmatter(existingText);
           if (parsed.frontmatterRaw) {
             frontmatterRaw = parsed.frontmatterRaw;
-            content = parsed.frontmatterRaw ? `---\n${parsed.frontmatterRaw}\n---\n${parsed.body.trimEnd()}\n\n${newEntry}` : existingText.trimEnd() + '\n\n' + newEntry;
+            content = `---\n${parsed.frontmatterRaw}\n---\n${parsed.body.trimEnd()}\n\n${newEntry}`;
           } else {
             content = existingText.trimEnd() + '\n\n' + newEntry;
           }
-        }
-        // If new file and tags selected, add frontmatter
-        if (!sha && writePageTags.length > 0) {
-          let fmYaml = 'tags:\n';
-          for (const v of writePageTags) fmYaml += `  - '${v}'\n`;
-          content = `---\n${fmYaml}---\n${content}`;
         }
 
         await apiPut(`/contents${path}`, {
@@ -1401,16 +1491,22 @@
           name: fileName,
           dateLabel: fmtDateShort(currentDate),
           weekday: w[currentDate.getDay()],
-          preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '')
+          preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : ''),
+          tags: writePageTags.length > 0 ? [...writePageTags] : []
         };
         const existingIndex = diaryCache.findIndex(d => d.name === fileName);
         if (existingIndex >= 0) {
+          // Merge tags with existing cache entry's tags
+          const existingTags = diaryCache[existingIndex].tags || [];
+          cacheEntry.tags = [...new Set([...existingTags, ...writePageTags])];
           diaryCache[existingIndex] = cacheEntry;
         } else {
           diaryCache.unshift(cacheEntry);
         }
 
         $('writeArea').value = '';
+        writePageTags = [];
+        renderWriteTags();
         showToast('已保存到 GitHub');
         setSyncBadge('', '已同步');
         setTimeout(hideSyncBadge, 3000);
@@ -1480,10 +1576,20 @@
           const detail = await apiGet(`/contents/${DIARY_DIR}/${f.name}`);
           if (detail && detail.content) {
             const full = base64ToUtf8(detail.content);
-            const parsed = parseFrontmatter(full);
-            preview = parsed.body.replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}\s*/g, ' ').trim();
+            const parsed = parseEntries(full);
+            // Build preview from all entry bodies
+            let allBody = '';
+            for (const entry of parsed.entries) {
+              allBody += entry.bodyLines.join('\n') + '\n';
+            }
+            preview = allBody.trim().replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}(\s+#[^\s#]+)*\s*/g, ' ').trim();
             preview = preview.slice(0, 60).replace(/\n/g, ' ') + (preview.length > 60 ? '...' : '');
-            tags = parsed.frontmatter.tags || [];
+            // Collect all unique entry-level tags
+            const allTags = new Set();
+            for (const entry of parsed.entries) {
+              for (const t of entry.tags) allTags.add(t);
+            }
+            tags = Array.from(allTags);
           }
         } catch(e) {}
 
@@ -1548,160 +1654,21 @@
       const detail = await apiGet(`/contents/${DIARY_DIR}/${fileName}`);
       if (!detail || !detail.content) { showToast('读取失败'); return; }
       const md = base64ToUtf8(detail.content);
-      const parsed = parseFrontmatter(md);
-      $('detailBody').innerHTML = marked.parse(parsed.body);
+      const parsed = parseEntries(md);
+      $('detailBody').innerHTML = renderEntriesHtml(parsed);
       currentDetailFile = fileName;
       currentDetailSha = detail.sha;
-      currentDetailTags = Array.isArray(parsed.frontmatter.tags) ? [...parsed.frontmatter.tags] : [];
-      currentDetailFrontmatter = parsed.frontmatter;
-      renderEditableTags();
+      // Show all unique tags at top for quick overview
+      const allTags = new Set();
+      for (const entry of parsed.entries) {
+        for (const t of entry.tags) allTags.add(t);
+      }
+      $('detailTags').innerHTML = allTags.size > 0
+        ? `<div class="tag-row">${Array.from(allTags).map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>`
+        : '';
       switchPage('detail');
     } catch (err) {
       showToast('读取失败: ' + err.message);
-    }
-  }
-
-  function renderEditableTags() {
-    const container = $('detailTags');
-    const allTags = (window.__tagSystem && window.__tagSystem.tags) ? window.__tagSystem.tags.map(t => t.name) : [];
-    // Recommendations based on body text
-    const bodyText = $('detailBody').textContent || '';
-    const recs = recommendTags(bodyText);
-    let html = '';
-
-    // Recommendations section
-    const newRecs = recs.filter(r => !currentDetailTags.includes(r));
-    if (newRecs.length > 0) {
-      html += `<div class="tag-section-label">💡 推荐标签（点击添加）</div>`;
-      html += `<div class="tag-selector">`;
-      for (const tag of newRecs) {
-        html += `<span class="tag-option tag-recommend" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
-      }
-      html += `</div>`;
-    }
-
-    // Selected tags
-    if (currentDetailTags.length > 0) {
-      html += `<div class="tag-section-label">已选标签</div>`;
-      html += `<div class="tag-selector">`;
-      for (const tag of currentDetailTags) {
-        html += `<span class="tag-option active" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)} <span class="tag-del" data-tag="${escapeHtml(tag)}">✕</span></span>`;
-      }
-      html += `</div>`;
-    }
-
-    // Tag library
-    const unused = allTags.filter(t => !currentDetailTags.includes(t) && !recs.includes(t));
-    if (unused.length > 0) {
-      html += `<div class="tag-section-label">标签库</div>`;
-      html += `<div class="tag-selector">`;
-      for (const tag of unused) {
-        html += `<span class="tag-option" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
-      }
-      html += `</div>`;
-    }
-
-    html += `<button class="tag-save" id="btnSaveTags">保存标签</button>`;
-    container.innerHTML = html;
-
-    // Bind events
-    container.querySelectorAll('.tag-option').forEach(el => {
-      el.addEventListener('click', e => {
-        if (e.target.classList.contains('tag-del')) {
-          e.stopPropagation();
-          removeTag(el.dataset.tag);
-        } else {
-          toggleTag(el.dataset.tag);
-        }
-      });
-    });
-    const btnSave = container.querySelector('#btnSaveTags');
-    if (btnSave) btnSave.addEventListener('click', saveTagsToGitHub);
-  }
-
-  function toggleTag(tagName) {
-    if (currentDetailTags.includes(tagName)) {
-      currentDetailTags = currentDetailTags.filter(t => t !== tagName);
-    } else {
-      currentDetailTags.push(tagName);
-    }
-    renderEditableTags();
-  }
-
-  function removeTag(tagName) {
-    currentDetailTags = currentDetailTags.filter(t => t !== tagName);
-    renderEditableTags();
-  }
-
-  function addTagPrompt() {
-    // Legacy fallback - now tags are selected from system
-    showToast('请从标签库中选择标签');
-  }
-
-  async function _doSaveTags(attempt) {
-    const detail = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
-    if (!detail || !detail.content) throw new Error('读取失败');
-    const md = base64ToUtf8(detail.content);
-    const parsed = parseFrontmatter(md);
-    const fm = parsed.frontmatter || {};
-    // Only keep tags that exist in tag system; filter out deleted ones
-    const validTags = (window.__tagSystem && window.__tagSystem.tags)
-      ? window.__tagSystem.tags.map(t => t.name)
-      : [];
-    const filteredTags = currentDetailTags.filter(t => validTags.includes(t));
-    if (filteredTags.length > 0) {
-      fm.tags = filteredTags;
-    } else {
-      delete fm.tags;
-    }
-    fm.manual_edited = true;
-    delete fm.auto_tagged;
-    delete fm.auto_tagged_at;
-    // Rebuild frontmatter YAML manually
-    let fmYaml = '';
-    for (const [key, val] of Object.entries(fm)) {
-      if (Array.isArray(val)) {
-        fmYaml += `${key}:\n`;
-        for (const v of val) {
-          fmYaml += `  - '${v}'\n`;
-        }
-      } else if (typeof val === 'boolean') {
-        fmYaml += `${key}: ${val}\n`;
-      } else {
-        fmYaml += `${key}: '${val}'\n`;
-      }
-    }
-    const content = `---\n${fmYaml}---\n${parsed.body}`;
-    await apiPut(`/contents/${DIARY_DIR}/${currentDetailFile}`, {
-      message: `diary: manual tag edit ${currentDetailFile}`,
-      content: utf8ToBase64(content),
-      sha: detail.sha
-    });
-    currentDetailSha = detail.sha;
-    showToast('标签已保存');
-    // Refresh to get new sha
-    const refreshed = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
-    if (refreshed) currentDetailSha = refreshed.sha;
-  }
-
-  async function saveTagsToGitHub() {
-    if (!currentDetailFile) { showToast('无当前文件'); return; }
-    try {
-      await _doSaveTags(1);
-    } catch (err) {
-      const msg = err.message || '';
-      if (msg.includes('409') || msg.includes('sha')) {
-        console.warn('[Tags] 409 conflict, retrying...');
-        try {
-          await _doSaveTags(2);
-        } catch (err2) {
-          console.error('[Tags] 重试失败:', err2);
-          showToast('保存冲突，请刷新后重试');
-        }
-      } else {
-        console.error('[Tags] 保存失败:', err);
-        showToast('保存失败: ' + msg);
-      }
     }
   }
 
@@ -1792,6 +1759,8 @@
         $('writeArea').value = '';
         writePageTags = [];
       }
+      // Show/hide tag selector based on edit mode
+      $('writeTags').style.display = editMode ? 'none' : 'block';
       renderWriteTags();
       setTimeout(() => $('writeArea').focus(), 100);
     } else if (page === 'detail' || page === 'history' || page === 'version' || page === 'diff') {
@@ -1885,7 +1854,8 @@
     const timeStr = `${date.getMonth()+1}月${date.getDate()}日 ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
     $('versionTitle').textContent = fileName.replace('.md', '') + ' 的版本';
     $('versionMeta').textContent = `${timeStr} — ${escapeHtml(commit.commit.message)}`;
-    $('versionBody').innerHTML = marked.parse(text);
+    const parsed = parseEntries(text);
+    $('versionBody').innerHTML = renderEntriesHtml(parsed);
     switchPage('version');
     // Bind diff button
     const btnDiff = $('btnDiffPrev');
@@ -2155,7 +2125,7 @@
       const parsed = parseFrontmatter(md);
       editMode = { fileName: currentDetailFile, sha: detail.sha, frontmatterRaw: parsed.frontmatterRaw };
       $('writeArea').value = parsed.body;
-      writePageTags = Array.isArray(parsed.frontmatter.tags) ? [...parsed.frontmatter.tags] : [];
+      writePageTags = []; // Edit mode does not use write page tags
       updateWriteModeUI();
       switchPage('write');
       showToast('已进入编辑模式');
