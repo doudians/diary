@@ -469,6 +469,77 @@
   }
   .tag-save:disabled { background: #ccc; cursor: not-allowed; }
 
+  /* Tag Manager */
+  .tag-manager-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .tag-manager-name {
+    font-weight: 600;
+    color: var(--accent);
+    min-width: 60px;
+  }
+  .tag-manager-kws {
+    color: var(--text-secondary);
+    flex: 1;
+    margin: 0 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tag-manager-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .tag-manager-actions button {
+    padding: 2px 8px;
+    font-size: 12px;
+  }
+
+  /* Tag Selector */
+  .tag-selector {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .tag-option {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tag-option.active {
+    background: #f0f7ff;
+    border-color: #2563eb;
+    color: #2563eb;
+  }
+  .tag-recommend {
+    background: #f5f5f5;
+    color: #666;
+    border-style: dashed;
+  }
+  .tag-recommend:hover {
+    background: #f0f7ff;
+    color: #2563eb;
+    border-color: #2563eb;
+  }
+  .tag-section-label {
+    font-size: 12px;
+    color: #888;
+    margin: 8px 0 4px;
+  }
+
   /* History */
   .history-list {
     list-style: none;
@@ -689,6 +760,28 @@
         <div class="hint" style="margin-top:6px;">密码错误将无法解密。如忘记密码，请重新生成书签链接。</div>
       </div>
 
+      <!-- Tag System -->
+      <div class="form-group" style="margin-top:24px;border-top:1px solid var(--border);padding-top:18px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <label style="margin-bottom:0;">🏷️ 标签体系</label>
+          <button class="btn btn-secondary btn-small" id="btnToggleTagManager">展开</button>
+        </div>
+        <div id="tagManagerBox" style="display:none;">
+          <div id="tagList" style="margin-bottom:12px;"></div>
+          <div id="tagEditForm" style="display:none;background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:12px;">
+            <input type="text" id="tagEditName" placeholder="标签名（如 #育儿）" style="margin-bottom:8px;">
+            <input type="text" id="tagEditKeywords" placeholder="关键词，逗号分隔（如 宝宝,奶粉,育儿）" style="margin-bottom:8px;">
+            <input type="text" id="tagEditRegex" placeholder="正则规则（可选，如 《([^》]+)》）" style="margin-bottom:8px;">
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-primary btn-small" id="btnTagEditSave">保存</button>
+              <button class="btn btn-secondary btn-small" id="btnTagEditCancel">取消</button>
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-small" id="btnAddNewTag">+ 添加标签</button>
+          <div class="hint" style="margin-top:8px;">标签体系保存在 diary-tags.json，所有设备同步。</div>
+        </div>
+      </div>
+
       <div class="settings-actions">
         <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
         <button class="btn btn-danger" id="btnClearData">清除本地数据</button>
@@ -790,6 +883,7 @@
   let historyCommits = []; // array of commit objects
   let currentHistoryFile = null;
   let currentVersionSha = null;
+  window.__tagSystem = null; // loaded from diary-tags.json
 
   // --- CryptoJS v3: deterministic encryption, no random salt ---
   function deriveKeyIV(password) {
@@ -1150,6 +1244,69 @@
     return `<div class="tag-row">${show.map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}${more}</div>`;
   }
 
+  // --- Tag System ---
+  const DEFAULT_TAG_SYSTEM = {
+    version: 1,
+    tags: [
+      { id: 'work', name: '#工作', keywords: ['加班','项目','会议','汇报','领导','处室','大队','信控','无人机','方案','推进','落实','调研','值班','执勤','部署'] },
+      { id: 'read', name: '#阅读', keywords: ['读完','看了','阅读','书籍'], regex: ['《([^》]+)》'] },
+      { id: 'life', name: '#生活', keywords: ['雪宝','老婆','家人','吃饭','散步','周末','假期','宅'] },
+      { id: 'sport', name: '#运动', keywords: ['锻炼','健身','跑步','练腿','深蹲'] },
+      { id: 'emotion', name: '#情绪', keywords: ['焦虑','反思','感悟','复盘','成长','调整'] },
+      { id: 'tech', name: '#技术', keywords: ['代码','API','GitHub','Docker','模型','AI','部署'] },
+      { id: 'social', name: '#人际', keywords: ['沟通','交流','饭局','关系','人脉','人情'] }
+    ]
+  };
+
+  async function loadTagSystem() {
+    try {
+      const detail = await apiGet('/contents/diary-tags.json');
+      if (detail && detail.content) {
+        const json = base64ToUtf8(detail.content);
+        window.__tagSystem = JSON.parse(json);
+        console.log('[Tags] Loaded tag system from repo');
+        return;
+      }
+    } catch(e) {
+      console.log('[Tags] diary-tags.json not found, using defaults');
+    }
+    window.__tagSystem = JSON.parse(JSON.stringify(DEFAULT_TAG_SYSTEM));
+  }
+
+  async function saveTagSystem(data) {
+    const content = JSON.stringify(data, null, 2);
+    try {
+      const existing = await apiGet('/contents/diary-tags.json');
+      await apiPut('/contents/diary-tags.json', {
+        message: 'diary: update tag system',
+        content: utf8ToBase64(content),
+        ...(existing && existing.sha ? { sha: existing.sha } : {})
+      });
+    } catch(err) {
+      console.error('[Tags] Save failed:', err);
+      throw err;
+    }
+  }
+
+  function recommendTags(text) {
+    if (!window.__tagSystem || !window.__tagSystem.tags) return [];
+    const lower = text.toLowerCase();
+    const recs = [];
+    for (const tag of window.__tagSystem.tags) {
+      let matched = false;
+      for (const kw of tag.keywords || []) {
+        if (lower.includes(kw.toLowerCase())) { matched = true; break; }
+      }
+      if (!matched && tag.regex) {
+        for (const pattern of tag.regex) {
+          if (new RegExp(pattern).test(text)) { matched = true; break; }
+        }
+      }
+      if (matched) recs.push(tag.name);
+    }
+    return recs;
+  }
+
   async function ensureDiaryDir() {
     // GitHub creates directories implicitly via file paths, but let's verify repo exists
     const repo = await apiGet('');
@@ -1360,6 +1517,7 @@
   async function showDetail(fileName) {
     if (!config) return;
     try {
+      if (!window.__tagSystem) await loadTagSystem();
       const detail = await apiGet(`/contents/${DIARY_DIR}/${fileName}`);
       if (!detail || !detail.content) { showToast('读取失败'); return; }
       const md = base64ToUtf8(detail.content);
@@ -1378,24 +1536,69 @@
 
   function renderEditableTags() {
     const container = $('detailTags');
+    const allTags = (window.__tagSystem && window.__tagSystem.tags) ? window.__tagSystem.tags.map(t => t.name) : [];
+    // Recommendations based on body text
+    const bodyText = $('detailBody').textContent || '';
+    const recs = recommendTags(bodyText);
     let html = '';
-    for (const tag of currentDetailTags) {
-      html += `<span class="tag-pill">${escapeHtml(tag)}<span class="tag-del" data-tag="${escapeHtml(tag)}">✕</span></span>`;
+
+    // Recommendations section
+    const newRecs = recs.filter(r => !currentDetailTags.includes(r));
+    if (newRecs.length > 0) {
+      html += `<div class="tag-section-label">💡 推荐标签（点击添加）</div>`;
+      html += `<div class="tag-selector">`;
+      for (const tag of newRecs) {
+        html += `<span class="tag-option tag-recommend" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
+      }
+      html += `</div>`;
     }
-    html += `<button class="tag-add" id="btnAddTag">+</button>`;
+
+    // Selected tags
+    if (currentDetailTags.length > 0) {
+      html += `<div class="tag-section-label">已选标签</div>`;
+      html += `<div class="tag-selector">`;
+      for (const tag of currentDetailTags) {
+        html += `<span class="tag-option active" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)} <span class="tag-del" data-tag="${escapeHtml(tag)}">✕</span></span>`;
+      }
+      html += `</div>`;
+    }
+
+    // Tag library
+    const unused = allTags.filter(t => !currentDetailTags.includes(t) && !recs.includes(t));
+    if (unused.length > 0) {
+      html += `<div class="tag-section-label">标签库</div>`;
+      html += `<div class="tag-selector">`;
+      for (const tag of unused) {
+        html += `<span class="tag-option" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
+      }
+      html += `</div>`;
+    }
+
     html += `<button class="tag-save" id="btnSaveTags">保存标签</button>`;
     container.innerHTML = html;
+
     // Bind events
-    container.querySelectorAll('.tag-del').forEach(el => {
+    container.querySelectorAll('.tag-option').forEach(el => {
       el.addEventListener('click', e => {
-        e.stopPropagation();
-        removeTag(el.dataset.tag);
+        if (e.target.classList.contains('tag-del')) {
+          e.stopPropagation();
+          removeTag(el.dataset.tag);
+        } else {
+          toggleTag(el.dataset.tag);
+        }
       });
     });
-    const btnAdd = container.querySelector('#btnAddTag');
-    if (btnAdd) btnAdd.addEventListener('click', addTagPrompt);
     const btnSave = container.querySelector('#btnSaveTags');
     if (btnSave) btnSave.addEventListener('click', saveTagsToGitHub);
+  }
+
+  function toggleTag(tagName) {
+    if (currentDetailTags.includes(tagName)) {
+      currentDetailTags = currentDetailTags.filter(t => t !== tagName);
+    } else {
+      currentDetailTags.push(tagName);
+    }
+    renderEditableTags();
   }
 
   function removeTag(tagName) {
@@ -1404,61 +1607,74 @@
   }
 
   function addTagPrompt() {
-    const raw = prompt('输入新标签，如 #育儿');
-    if (!raw) return;
-    const tag = raw.trim();
-    if (!/^#[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(tag)) {
-      showToast('标签格式错误，必须以#开头，后接中文/字母/数字');
-      return;
+    // Legacy fallback - now tags are selected from system
+    showToast('请从标签库中选择标签');
+  }
+
+  async function _doSaveTags(attempt) {
+    const detail = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
+    if (!detail || !detail.content) throw new Error('读取失败');
+    const md = base64ToUtf8(detail.content);
+    const parsed = parseFrontmatter(md);
+    const fm = parsed.frontmatter || {};
+    // Only keep tags that exist in tag system; filter out deleted ones
+    const validTags = (window.__tagSystem && window.__tagSystem.tags)
+      ? window.__tagSystem.tags.map(t => t.name)
+      : [];
+    const filteredTags = currentDetailTags.filter(t => validTags.includes(t));
+    if (filteredTags.length > 0) {
+      fm.tags = filteredTags;
+    } else {
+      delete fm.tags;
     }
-    if (currentDetailTags.includes(tag)) {
-      showToast('标签已存在');
-      return;
+    fm.manual_edited = true;
+    delete fm.auto_tagged;
+    delete fm.auto_tagged_at;
+    // Rebuild frontmatter YAML manually
+    let fmYaml = '';
+    for (const [key, val] of Object.entries(fm)) {
+      if (Array.isArray(val)) {
+        fmYaml += `${key}:\n`;
+        for (const v of val) {
+          fmYaml += `  - '${v}'\n`;
+        }
+      } else if (typeof val === 'boolean') {
+        fmYaml += `${key}: ${val}\n`;
+      } else {
+        fmYaml += `${key}: '${val}'\n`;
+      }
     }
-    currentDetailTags.push(tag);
-    renderEditableTags();
+    const content = `---\n${fmYaml}---\n${parsed.body}`;
+    await apiPut(`/contents/${DIARY_DIR}/${currentDetailFile}`, {
+      message: `diary: manual tag edit ${currentDetailFile}`,
+      content: utf8ToBase64(content),
+      sha: detail.sha
+    });
+    currentDetailSha = detail.sha;
+    showToast('标签已保存');
+    // Refresh to get new sha
+    const refreshed = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
+    if (refreshed) currentDetailSha = refreshed.sha;
   }
 
   async function saveTagsToGitHub() {
-    if (!currentDetailFile || !currentDetailSha) { showToast('无当前文件'); return; }
+    if (!currentDetailFile) { showToast('无当前文件'); return; }
     try {
-      const detail = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
-      if (!detail || !detail.content) { showToast('读取失败'); return; }
-      const md = base64ToUtf8(detail.content);
-      const parsed = parseFrontmatter(md);
-      const fm = parsed.frontmatter || {};
-      fm.tags = [...currentDetailTags];
-      fm.manual_edited = true;
-      delete fm.auto_tagged;
-      delete fm.auto_tagged_at;
-      // Rebuild frontmatter YAML manually
-      let fmYaml = '';
-      for (const [key, val] of Object.entries(fm)) {
-        if (Array.isArray(val)) {
-          fmYaml += `${key}:\n`;
-          for (const v of val) {
-            fmYaml += `  - '${v}'\n`;
-          }
-        } else if (typeof val === 'boolean') {
-          fmYaml += `${key}: ${val}\n`;
-        } else {
-          fmYaml += `${key}: '${val}'\n`;
-        }
-      }
-      const content = `---\n${fmYaml}---\n${parsed.body}`;
-      await apiPut(`/contents/${DIARY_DIR}/${currentDetailFile}`, {
-        message: `diary: manual tag edit ${currentDetailFile}`,
-        content: utf8ToBase64(content),
-        sha: detail.sha
-      });
-      currentDetailSha = detail.sha; // will be updated after push, but we need fresh sha
-      showToast('标签已保存');
-      // Refresh to get new sha
-      const refreshed = await apiGet(`/contents/${DIARY_DIR}/${currentDetailFile}`);
-      if (refreshed) currentDetailSha = refreshed.sha;
+      await _doSaveTags(1);
     } catch (err) {
-      console.error('[Tags] 保存失败:', err);
-      showToast('保存失败: ' + err.message);
+      const msg = err.message || '';
+      if (msg.includes('409') || msg.includes('sha')) {
+        console.warn('[Tags] 409 conflict, retrying...');
+        try {
+          await _doSaveTags(2);
+        } catch (err2) {
+          console.error('[Tags] 重试失败:', err2);
+          showToast('保存冲突，请刷新后重试');
+        }
+      } else {
+        console.error('[Tags] 保存失败:', err);
+        showToast('保存失败: ' + msg);
+      }
     }
   }
 
@@ -1502,6 +1718,10 @@
     }
 
     if (page === 'list') loadDiaryList();
+    if (page === 'settings') {
+      if (!window.__tagSystem) loadTagSystem().then(renderTagManager);
+      else renderTagManager();
+    }
   }
 
   // --- Git History ---
@@ -1649,6 +1869,79 @@
       html += `<div class="diff-line ${line.type}"><span class="diff-marker">${marker}</span><span style="width:36px;text-align:right;color:#999;flex-shrink:0;padding-right:8px;">${num}</span><span class="diff-text">${escapeHtml(line.text)}</span></div>`;
     }
     return html;
+  }
+
+  // --- Tag Manager UI ---
+  function renderTagManager() {
+    const container = $('tagList');
+    if (!window.__tagSystem || !window.__tagSystem.tags) {
+      container.innerHTML = '<div class="hint">加载中...</div>';
+      return;
+    }
+    let html = '';
+    for (const tag of window.__tagSystem.tags) {
+      const kws = tag.keywords ? tag.keywords.slice(0, 3).join(', ') + (tag.keywords.length > 3 ? '...' : '') : '';
+      html += `<div class="tag-manager-item">
+        <span class="tag-manager-name">${escapeHtml(tag.name)}</span>
+        <span class="tag-manager-kws">${escapeHtml(kws)}</span>
+        <div class="tag-manager-actions">
+          <button class="btn btn-secondary btn-small" data-id="${tag.id}" data-action="edit">编辑</button>
+          <button class="btn btn-danger btn-small" data-id="${tag.id}" data-action="del">删除</button>
+        </div>
+      </div>`;
+    }
+    container.innerHTML = html;
+    container.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const id = e.target.dataset.id;
+        const action = e.target.dataset.action;
+        if (action === 'edit') editTag(id);
+        else if (action === 'del') deleteTag(id);
+      });
+    });
+  }
+
+  function editTag(id) {
+    const tag = window.__tagSystem.tags.find(t => t.id === id);
+    if (!tag) return;
+    $('tagEditName').value = tag.name;
+    $('tagEditKeywords').value = tag.keywords ? tag.keywords.join(',') : '';
+    $('tagEditRegex').value = tag.regex ? tag.regex.join(',') : '';
+    $('tagEditForm').style.display = 'block';
+    $('tagEditForm').dataset.editId = id;
+  }
+
+  function deleteTag(id) {
+    if (!confirm('确定删除此标签？已打在日记上的标签不会被删除。')) return;
+    window.__tagSystem.tags = window.__tagSystem.tags.filter(t => t.id !== id);
+    renderTagManager();
+  }
+
+  async function saveTagEdit() {
+    const id = $('tagEditForm').dataset.editId;
+    const name = $('tagEditName').value.trim();
+    const kws = $('tagEditKeywords').value.split(',').map(s => s.trim()).filter(Boolean);
+    const rx = $('tagEditRegex').value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!name || !/^#[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(name)) {
+      showToast('标签名格式错误'); return;
+    }
+    const newTag = { id: id || 'tag_' + Date.now(), name, keywords: kws };
+    if (rx.length) newTag.regex = rx;
+    if (id) {
+      const idx = window.__tagSystem.tags.findIndex(t => t.id === id);
+      if (idx >= 0) window.__tagSystem.tags[idx] = newTag;
+    } else {
+      window.__tagSystem.tags.push(newTag);
+    }
+    try {
+      await saveTagSystem(window.__tagSystem);
+      showToast('标签体系已保存');
+      $('tagEditForm').style.display = 'none';
+      $('tagEditForm').dataset.editId = '';
+      renderTagManager();
+    } catch(err) {
+      showToast('保存失败: ' + err.message);
+    }
   }
 
   async function testConnection() {
@@ -1898,8 +2191,38 @@
   window.addEventListener('online', updateOnlineStatus);
   window.addEventListener('offline', updateOnlineStatus);
 
+  // Tag Manager events
+  if ($('btnToggleTagManager')) {
+    $('btnToggleTagManager').addEventListener('click', () => {
+      const box = $('tagManagerBox');
+      const visible = box.style.display === 'block';
+      box.style.display = visible ? 'none' : 'block';
+      $('btnToggleTagManager').textContent = visible ? '展开' : '收起';
+      if (!visible) renderTagManager();
+    });
+  }
+  if ($('btnAddNewTag')) {
+    $('btnAddNewTag').addEventListener('click', () => {
+      $('tagEditForm').style.display = 'block';
+      $('tagEditForm').dataset.editId = '';
+      $('tagEditName').value = '';
+      $('tagEditKeywords').value = '';
+      $('tagEditRegex').value = '';
+    });
+  }
+  if ($('btnTagEditSave')) {
+    $('btnTagEditSave').addEventListener('click', saveTagEdit);
+  }
+  if ($('btnTagEditCancel')) {
+    $('btnTagEditCancel').addEventListener('click', () => {
+      $('tagEditForm').style.display = 'none';
+      $('tagEditForm').dataset.editId = '';
+    });
+  }
+
   // Init
   updateOnlineStatus();
+  loadTagSystem().catch(() => {}); // preload tag system in background
   const hasCfgHash = applyHashConfig();
   const hasEncHash = applyEncConfig();
   loadConfig();

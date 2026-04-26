@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Auto-tag diary entries based on keyword matching."""
+"""Auto-tag diary entries based on keyword matching from diary-tags.json."""
 
 import json
 import re
@@ -13,56 +13,59 @@ except ImportError:
     raise SystemExit(1)
 
 DIARY_DIR = Path("diary")
-RULES_PATH = Path(__file__).with_name("tag_rules.json")
+TAGS_PATH = Path("diary-tags.json")
+
+DEFAULT_RULES = [
+    {"tag": "#工作", "keywords": ["加班","项目","会议","汇报","领导","处室","大队","信控","无人机","方案","推进","落实","调研","值班","执勤","部署"]},
+    {"tag": "#阅读", "keywords": ["读完","看了","阅读","书籍"], "regex": [r"《([^》]+)》"]},
+    {"tag": "#生活", "keywords": ["雪宝","老婆","家人","吃饭","散步","周末","假期","宅"]},
+    {"tag": "#运动", "keywords": ["锻炼","健身","跑步","练腿","深蹲"]},
+    {"tag": "#情绪", "keywords": ["焦虑","反思","感悟","复盘","成长","调整"]},
+    {"tag": "#技术", "keywords": ["代码","API","GitHub","Docker","模型","AI","部署"]},
+    {"tag": "#人际", "keywords": ["沟通","交流","饭局","关系","人脉","人情"]},
+]
 
 
 def load_rules() -> list[dict]:
-    """Load tagging rules from JSON file."""
-    if RULES_PATH.exists():
-        data = json.loads(RULES_PATH.read_text(encoding="utf-8"))
-        return data.get("rules", [])
-    return []
+    """Load tagging rules from diary-tags.json, fallback to defaults."""
+    if TAGS_PATH.exists():
+        try:
+            data = json.loads(TAGS_PATH.read_text(encoding="utf-8"))
+            tags = data.get("tags", [])
+            rules = []
+            for t in tags:
+                rule = {"tag": t["name"], "keywords": t.get("keywords", [])}
+                if "regex" in t:
+                    rule["regex"] = t["regex"]
+                rules.append(rule)
+            return rules
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"[WARN] Failed to load {TAGS_PATH}: {e}, using defaults")
+    return DEFAULT_RULES
 
 
 RULES = load_rules()
 
 
 def extract_tags(content: str) -> list[str]:
-    """Return matched tags based on content text, with exclude_from handling."""
+    """Return matched tags based on content text."""
     text = content.lower()
-    matched_rules: list[dict] = []
+    tags: set[str] = set()
 
     for rule in RULES:
         matched = False
-        # Keyword matching
         if "keywords" in rule:
             for kw in rule["keywords"]:
                 if kw in text:
                     matched = True
                     break
-        # Regex matching
         if not matched and "regex" in rule:
             for pattern in rule["regex"]:
                 if re.search(pattern, content):
                     matched = True
                     break
         if matched:
-            matched_rules.append(rule)
-
-    # Build tag set and check exclusions
-    tags: set[str] = set()
-    for rule in matched_rules:
-        tag = rule["tag"]
-        excludes = rule.get("exclude_from", [])
-        # If this tag excludes another, check if that other tag is also matched
-        if excludes:
-            excluded_tags = set(excludes)
-            other_matched = {r["tag"] for r in matched_rules if r["tag"] != tag}
-            # Only keep this tag if none of its excluded tags are matched
-            if not excluded_tags & other_matched:
-                tags.add(tag)
-        else:
-            tags.add(tag)
+            tags.add(rule["tag"])
 
     return sorted(tags)
 
@@ -88,12 +91,10 @@ def process_file(filepath: Path) -> bool:
         print(f"Skip (manual_edited): {filepath.name}")
         return False
 
-    # Extract auto tags from body
     auto_tags = extract_tags(body)
     if not auto_tags:
         return False
 
-    # Merge tags: keep existing tags, append auto tags
     existing_tags = frontmatter.get("tags", [])
     if isinstance(existing_tags, str):
         existing_tags = [existing_tags]
@@ -111,12 +112,10 @@ def process_file(filepath: Path) -> bool:
     if set(merged_tags) == set(existing_tags):
         return False
 
-    # Update frontmatter
     frontmatter["tags"] = merged_tags
     frontmatter["auto_tagged"] = True
     frontmatter["auto_tagged_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Rebuild file content
     fm_yaml = yaml.dump(
         frontmatter,
         allow_unicode=True,
@@ -135,7 +134,6 @@ def main() -> None:
         if process_file(md_file):
             modified += 1
             print(f"Tagged: {md_file.name}")
-
     print(f"Total modified: {modified}")
 
 
