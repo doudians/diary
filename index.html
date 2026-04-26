@@ -645,6 +645,7 @@
         <span id="writeModeHint" style="font-size:11px;color:#bbb;">自动保存到 GitHub</span>
       </div>
       <textarea class="write-area" id="writeArea" placeholder="今天发生了什么..."></textarea>
+      <div id="writeTags" style="padding:0 20px 12px;"></div>
     </div>
 
     <!-- List -->
@@ -872,7 +873,8 @@
   let currentDate = new Date();
   let isOnline = navigator.onLine;
   let diaryCache = []; // in-memory cache for instant list updates
-  let editMode = null; // { fileName, sha } or null
+  let editMode = null; // { fileName, sha, frontmatterRaw } or null
+  let writePageTags = []; // tags selected on write page
   let currentDetailFile = null;
   let currentDetailSha = null;
   let currentDetailTags = []; // in-memory tags for editing
@@ -1323,12 +1325,26 @@
       await ensureDiaryDir();
 
       if (editMode) {
-        // Edit mode: overwrite entire file, preserve frontmatter
+        // Edit mode: overwrite entire file, preserve frontmatter, update tags
         const fileName = editMode.fileName;
         const path = `/${DIARY_DIR}/${fileName}`;
         let content = text;
         if (editMode.frontmatterRaw) {
-          content = `---\n${editMode.frontmatterRaw}\n---\n${text}`;
+          const fm = parseFrontmatter(`---\n${editMode.frontmatterRaw}\n---\n`).frontmatter;
+          if (writePageTags.length > 0) fm.tags = writePageTags;
+          else delete fm.tags;
+          let fmYaml = '';
+          for (const [key, val] of Object.entries(fm)) {
+            if (Array.isArray(val)) {
+              fmYaml += `${key}:\n`;
+              for (const v of val) fmYaml += `  - '${v}'\n`;
+            } else if (typeof val === 'boolean') {
+              fmYaml += `${key}: ${val}\n`;
+            } else {
+              fmYaml += `${key}: '${val}'\n`;
+            }
+          }
+          content = `---\n${fmYaml}---\n${text}`;
         }
         await apiPut(`/contents${path}`, {
           message: `diary: edit ${fileName}`,
@@ -1354,11 +1370,24 @@
         const newEntry = `## ${timeStr}\n${text}\n\n`;
         let content = `# ${fmtFileDate(currentDate)}\n\n${newEntry}`;
         let sha = null;
+        let frontmatterRaw = '';
         const existing = await apiGet(`/contents${path}`);
         if (existing && existing.content) {
           sha = existing.sha;
           const existingText = base64ToUtf8(existing.content);
-          content = existingText.trimEnd() + '\n\n' + newEntry;
+          const parsed = parseFrontmatter(existingText);
+          if (parsed.frontmatterRaw) {
+            frontmatterRaw = parsed.frontmatterRaw;
+            content = parsed.frontmatterRaw ? `---\n${parsed.frontmatterRaw}\n---\n${parsed.body.trimEnd()}\n\n${newEntry}` : existingText.trimEnd() + '\n\n' + newEntry;
+          } else {
+            content = existingText.trimEnd() + '\n\n' + newEntry;
+          }
+        }
+        // If new file and tags selected, add frontmatter
+        if (!sha && writePageTags.length > 0) {
+          let fmYaml = 'tags:\n';
+          for (const v of writePageTags) fmYaml += `  - '${v}'\n`;
+          content = `---\n${fmYaml}---\n${content}`;
         }
 
         await apiPut(`/contents${path}`, {
@@ -1676,6 +1705,62 @@
     }
   }
 
+  function renderWriteTags() {
+    const container = $('writeTags');
+    const text = $('writeArea').value;
+    const recs = recommendTags(text);
+    const allTags = (window.__tagSystem && window.__tagSystem.tags) ? window.__tagSystem.tags.map(t => t.name) : [];
+    let html = '';
+
+    const newRecs = recs.filter(r => !writePageTags.includes(r));
+    if (newRecs.length > 0) {
+      html += `<div class="tag-section-label">💡 推荐标签（点击添加）</div>`;
+      html += `<div class="tag-selector">`;
+      for (const tag of newRecs) {
+        html += `<span class="tag-option tag-recommend" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    if (writePageTags.length > 0) {
+      html += `<div class="tag-section-label">已选标签</div>`;
+      html += `<div class="tag-selector">`;
+      for (const tag of writePageTags) {
+        html += `<span class="tag-option active" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)} <span class="tag-del" data-tag="${escapeHtml(tag)}">✕</span></span>`;
+      }
+      html += `</div>`;
+    }
+
+    const unused = allTags.filter(t => !writePageTags.includes(t) && !recs.includes(t));
+    if (unused.length > 0) {
+      html += `<div class="tag-section-label">标签库</div>`;
+      html += `<div class="tag-selector">`;
+      for (const tag of unused) {
+        html += `<span class="tag-option" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    container.innerHTML = html;
+    container.querySelectorAll('.tag-option').forEach(el => {
+      el.addEventListener('click', e => {
+        if (e.target.classList.contains('tag-del')) {
+          e.stopPropagation();
+          writePageTags = writePageTags.filter(t => t !== el.dataset.tag);
+          renderWriteTags();
+        } else {
+          const tag = el.dataset.tag;
+          if (writePageTags.includes(tag)) {
+            writePageTags = writePageTags.filter(t => t !== tag);
+          } else {
+            writePageTags.push(tag);
+          }
+          renderWriteTags();
+        }
+      });
+    });
+  }
+
   function switchPage(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1705,7 +1790,9 @@
       updateWriteModeUI();
       if (!editMode) {
         $('writeArea').value = '';
+        writePageTags = [];
       }
+      renderWriteTags();
       setTimeout(() => $('writeArea').focus(), 100);
     } else if (page === 'detail' || page === 'history' || page === 'version' || page === 'diff') {
       $('saveBar').style.display = 'none';
@@ -2068,6 +2155,7 @@
       const parsed = parseFrontmatter(md);
       editMode = { fileName: currentDetailFile, sha: detail.sha, frontmatterRaw: parsed.frontmatterRaw };
       $('writeArea').value = parsed.body;
+      writePageTags = Array.isArray(parsed.frontmatter.tags) ? [...parsed.frontmatter.tags] : [];
       updateWriteModeUI();
       switchPage('write');
       showToast('已进入编辑模式');
@@ -2142,6 +2230,13 @@
   if ($('unlockPwd')) {
     $('unlockPwd').addEventListener('keydown', e => {
       if (e.key === 'Enter') tryUnlock();
+    });
+  }
+  if ($('writeArea')) {
+    $('writeArea').addEventListener('input', () => {
+      if ($('page-write').classList.contains('active')) {
+        renderWriteTags();
+      }
     });
   }
 
