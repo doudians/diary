@@ -655,6 +655,119 @@
     flex: 1;
     padding-left: 8px;
   }
+
+  /* Tag Filter Bar */
+  .tag-filter-bar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 20px;
+    border-bottom: 1px solid #eee;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-shrink: 0;
+  }
+  .tag-filter-bar::-webkit-scrollbar { display: none; }
+  .tag-filter-pill {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid #2563eb;
+    background: #fff;
+    color: #2563eb;
+    transition: all 0.15s;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tag-filter-pill.active {
+    background: #2563eb;
+    color: #fff;
+    border-color: #2563eb;
+  }
+  .diary-item .tag-pill {
+    cursor: pointer;
+  }
+
+  /* Dashboard */
+  .dashboard-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .dashboard-card {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 16px 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .dashboard-card:active { transform: scale(0.98); }
+  .dashboard-card .num {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .dashboard-card .label {
+    font-size: 12px;
+    color: #888;
+    margin-top: 4px;
+  }
+  .dashboard-section-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 20px 0 10px;
+    color: var(--text);
+  }
+  .tag-stat-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f5f5f5;
+    cursor: pointer;
+  }
+  .tag-stat-row:active { background: #fafafa; }
+  .tag-stat-name {
+    min-width: 60px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .tag-stat-count {
+    min-width: 40px;
+    text-align: right;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .tag-stat-bar-wrap {
+    flex: 1;
+    height: 8px;
+    background: #f0f0f0;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .tag-stat-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+  .tag-stat-recent {
+    min-width: 60px;
+    text-align: right;
+    font-size: 12px;
+    color: #888;
+  }
+  @media (max-width: 400px) {
+    .dashboard-cards { gap: 8px; }
+    .dashboard-card { padding: 12px 4px; }
+    .dashboard-card .num { font-size: 18px; }
+  }
 </style>
 </head>
 <body>
@@ -686,6 +799,7 @@
         <input type="text" id="listSearch" placeholder="搜索日记内容..." autocomplete="off">
         <span class="search-clear" id="searchClear">✕</span>
       </div>
+      <div class="tag-filter-bar" id="tagFilterBar"></div>
       <div id="listStatus" style="font-size:12px;color:#888;margin-bottom:10px;"></div>
       <ul class="diary-list" id="diaryList"></ul>
       <div class="empty-state" id="listEmpty" style="display:none;">
@@ -693,6 +807,26 @@
         <p>还没有日记</p>
         <p style="font-size:13px;margin-top:4px;">写下你的第一篇日记吧</p>
       </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="page" id="page-dashboard">
+      <div class="dashboard-cards">
+        <div class="dashboard-card" id="dashCardTotal">
+          <div class="num" id="dashTotal">0</div>
+          <div class="label">篇日记</div>
+        </div>
+        <div class="dashboard-card" id="dashCardMonth">
+          <div class="num" id="dashMonth">0</div>
+          <div class="label">本月新增</div>
+        </div>
+        <div class="dashboard-card" id="dashCardTop">
+          <div class="num" id="dashTopTag" style="font-size:16px;">-</div>
+          <div class="label">最常用标签</div>
+        </div>
+      </div>
+      <div class="dashboard-section-title">标签分布</div>
+      <div id="dashboardTagStats"></div>
     </div>
 
     <!-- Detail -->
@@ -842,6 +976,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
       日记
     </button>
+    <button class="nav-item" data-page="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      看板
+    </button>
     <button class="nav-item" data-page="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.68 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.82.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 15a1.65 1.65 0 00-.33 1.82V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09z"/></svg>
       设置
@@ -924,6 +1062,7 @@
   let currentHistoryFile = null;
   let currentVersionSha = null;
   window.__tagSystem = null; // loaded from diary-tags.json
+  let currentTagFilter = '全部';
 
   // --- CryptoJS v3: deterministic encryption, no random salt ---
   function deriveKeyIV(password) {
@@ -1655,32 +1794,69 @@
       li.className = 'diary-item';
       const tagsHtml = renderTags(item.tags, 3);
       li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${item.preview}</div>`;
-      li.addEventListener('click', () => showDetail(item.name));
+      li.addEventListener('click', e => {
+        // If clicked on a tag pill, trigger filter instead of detail
+        if (e.target.classList.contains('tag-pill')) {
+          e.stopPropagation();
+          currentTagFilter = e.target.textContent.trim();
+          switchPage('list');
+          return;
+        }
+        showDetail(item.name);
+      });
       $('diaryList').appendChild(li);
     }
   }
 
-  function filterDiaryList() {
+  function applyDiaryFilters() {
     const keyword = $('listSearch').value.trim().toLowerCase();
-    if (!keyword) {
-      renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇日记`);
-      $('searchClear').classList.remove('show');
-      return;
+    let items = [...diaryCache];
+    // Tag filter
+    if (currentTagFilter !== '全部') {
+      items = items.filter(d => (d.tags || []).includes(currentTagFilter));
     }
-    $('searchClear').classList.add('show');
-    const filtered = diaryCache.filter(item =>
-      item.name.toLowerCase().includes(keyword) ||
-      item.dateLabel.toLowerCase().includes(keyword) ||
-      item.weekday.toLowerCase().includes(keyword) ||
-      item.preview.toLowerCase().includes(keyword)
-    );
-    if (filtered.length === 0) {
+    // Keyword filter
+    if (keyword) {
+      items = items.filter(item =>
+        item.name.toLowerCase().includes(keyword) ||
+        item.dateLabel.toLowerCase().includes(keyword) ||
+        item.weekday.toLowerCase().includes(keyword) ||
+        item.preview.toLowerCase().includes(keyword)
+      );
+    }
+    // Update UI
+    if (!keyword) $('searchClear').classList.remove('show');
+    else $('searchClear').classList.add('show');
+
+    if (items.length === 0) {
       $('diaryList').innerHTML = '';
       $('listEmpty').style.display = 'block';
-      $('listStatus').textContent = `未找到包含「${$('listSearch').value.trim()}」的日记`;
+      if (currentTagFilter !== '全部' && keyword) {
+        $('listStatus').textContent = `「${currentTagFilter}」+「${$('listSearch').value.trim()}」无匹配日记`;
+      } else if (currentTagFilter !== '全部') {
+        $('listStatus').textContent = `「${currentTagFilter}」标签下暂无日记`;
+      } else if (keyword) {
+        $('listStatus').textContent = `未找到包含「${$('listSearch').value.trim()}」的日记`;
+      } else {
+        $('listStatus').textContent = '';
+      }
     } else {
-      renderDiaryList(filtered, `找到 ${filtered.length} 篇匹配「${$('listSearch').value.trim()}」的日记`);
+      let status = '';
+      if (currentTagFilter !== '全部' && keyword) {
+        status = `「${currentTagFilter}」+「${$('listSearch').value.trim()}」找到 ${items.length} 篇`;
+      } else if (currentTagFilter !== '全部') {
+        status = `「${currentTagFilter}」标签下 ${items.length} 篇日记`;
+      } else if (keyword) {
+        status = `找到 ${items.length} 篇匹配「${$('listSearch').value.trim()}」的日记`;
+      } else {
+        status = `共 ${items.length} 篇日记`;
+      }
+      renderDiaryList(items, status);
     }
+  }
+
+  function filterDiaryList() {
+    applyDiaryFilters();
   }
 
   async function showDetail(fileName) {
@@ -1764,6 +1940,100 @@
     });
   }
 
+  // --- Tag Filter on List Page ---
+  function renderTagFilter() {
+    const bar = $('tagFilterBar');
+    if (!bar) return;
+    const allTagNames = (window.__tagSystem && window.__tagSystem.tags)
+      ? window.__tagSystem.tags.map(t => t.name)
+      : [];
+    let html = '';
+    // "全部" pill
+    html += `<span class="tag-filter-pill ${currentTagFilter === '全部' ? 'active' : ''}" data-tag="全部">全部</span>`;
+    // Individual tag pills
+    for (const tag of allTagNames) {
+      html += `<span class="tag-filter-pill ${currentTagFilter === tag ? 'active' : ''}" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
+    }
+    bar.innerHTML = html;
+    bar.querySelectorAll('.tag-filter-pill').forEach(el => {
+      el.addEventListener('click', () => {
+        currentTagFilter = el.dataset.tag;
+        renderTagFilter();
+        applyDiaryFilters();
+      });
+    });
+  }
+
+  // --- Dashboard ---
+  const DASHBOARD_COLORS = ['#2563eb','#16a34a','#dc2626','#ca8a04','#7c3aed','#0891b2','#db2777','#65a30d'];
+
+  function calcDashboardData() {
+    const total = diaryCache.length;
+    const currentMonth = new Date().toISOString().slice(0, 7); // "2026-04"
+    const monthCount = diaryCache.filter(d => d.name.startsWith(currentMonth)).length;
+    // Tag stats
+    const tagStats = {};
+    diaryCache.forEach(d => {
+      (d.tags || []).forEach(tag => {
+        tagStats[tag] = (tagStats[tag] || 0) + 1;
+      });
+    });
+    let topTag = '-', topCount = 0;
+    Object.entries(tagStats).forEach(([tag, count]) => {
+      if (count > topCount) { topTag = tag; topCount = count; }
+    });
+    // Tag details
+    const tagDetails = (window.__tagSystem && window.__tagSystem.tags)
+      ? window.__tagSystem.tags.map((t, i) => {
+          const count = tagStats[t.name] || 0;
+          const recent = diaryCache.find(d => (d.tags || []).includes(t.name));
+          return {
+            name: t.name,
+            count,
+            color: DASHBOARD_COLORS[i % DASHBOARD_COLORS.length],
+            recentDate: recent ? recent.dateLabel : '-'
+          };
+        })
+      : [];
+    return { total, monthCount, topTag, tagDetails, maxCount: Math.max(1, ...tagDetails.map(t => t.count)) };
+  }
+
+  function renderDashboard() {
+    const data = calcDashboardData();
+    $('dashTotal').textContent = data.total;
+    $('dashMonth').textContent = data.monthCount;
+    $('dashTopTag').textContent = data.topTag;
+
+    // Tag stats rows
+    let html = '';
+    for (const t of data.tagDetails) {
+      const pct = data.maxCount > 0 ? (t.count / data.maxCount * 100) : 0;
+      html += `<div class="tag-stat-row" data-tag="${escapeHtml(t.name)}">
+        <span class="tag-stat-name" style="color:${t.color}">${escapeHtml(t.name)}</span>
+        <span class="tag-stat-count">${t.count}篇</span>
+        <div class="tag-stat-bar-wrap"><div class="tag-stat-bar-fill" style="width:${pct}%;background:${t.color}"></div></div>
+        <span class="tag-stat-recent">${escapeHtml(t.recentDate)}</span>
+      </div>`;
+    }
+    $('dashboardTagStats').innerHTML = html;
+
+    // Click handlers
+    $('dashboardTagStats').querySelectorAll('.tag-stat-row').forEach(row => {
+      row.addEventListener('click', () => {
+        currentTagFilter = row.dataset.tag;
+        switchPage('list');
+      });
+    });
+    // Re-bind total card click (avoid duplicate listeners via clone)
+    const oldTotal = $('dashCardTotal');
+    const newTotal = oldTotal.cloneNode(true);
+    oldTotal.parentNode.replaceChild(newTotal, oldTotal);
+    newTotal.addEventListener('click', () => {
+      currentTagFilter = '全部';
+      switchPage('list');
+    });
+  }
+
   function switchPage(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1771,6 +2041,7 @@
     const map = {
       write: { page: 'page-write', nav: 'write', title: fmtDate(currentDate), subtitle: '记录当下的想法' },
       list: { page: 'page-list', nav: 'list', title: '日记列表', subtitle: '' },
+      dashboard: { page: 'page-dashboard', nav: 'dashboard', title: '看板', subtitle: '个人数据仪表盘' },
       detail: { page: 'page-detail', nav: 'list', title: '日记详情', subtitle: '' },
       settings: { page: 'page-settings', nav: 'settings', title: '设置', subtitle: 'GitHub 连接配置' },
       history: { page: 'page-history', nav: 'list', title: '历史版本', subtitle: '' },
@@ -1816,7 +2087,13 @@
       $('nav').style.display = 'flex';
     }
 
-    if (page === 'list') loadDiaryList();
+    if (page === 'list') {
+      loadDiaryList();
+      renderTagFilter();
+    }
+    if (page === 'dashboard') {
+      renderDashboard();
+    }
     if (page === 'settings') {
       // Always render from current data first, then background reload if needed
       renderTagManager();
