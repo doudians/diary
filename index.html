@@ -1397,18 +1397,39 @@
     }
   }
 
-  async function saveTagSystem(data) {
-    const content = JSON.stringify(data, null, 2);
+  // Unified tag system save with 409 retry
+  async function saveTagSystemToGitHub(tagSystem) {
+    console.log('[TagSystem] 开始保存到 GitHub，标签数:', tagSystem.tags.length);
+    // 1. Read latest sha
+    let sha = null;
     try {
       const existing = await apiGet('/contents/diary-tags.json');
-      await apiPut('/contents/diary-tags.json', {
-        message: 'diary: update tag system',
-        content: utf8ToBase64(content),
-        ...(existing && existing.sha ? { sha: existing.sha } : {})
-      });
+      if (existing && existing.sha) sha = existing.sha;
+    } catch(e) {
+      console.log('[TagSystem] 读取 sha 失败（可能文件不存在）:', e.message);
+    }
+    // 2. Build request
+    const content = utf8ToBase64(JSON.stringify(tagSystem, null, 2));
+    const body = {
+      message: 'diary: update tag system',
+      content: content
+    };
+    if (sha) body.sha = sha;
+    // 3. Submit
+    try {
+      await apiPut('/contents/diary-tags.json', body);
+      window.__tagSystem = tagSystem;
+      console.log('[TagSystem] 保存成功，当前标签:', tagSystem.tags.map(t => t.name));
+      return true;
     } catch(err) {
-      console.error('[Tags] Save failed:', err);
-      throw err;
+      console.error('[TagSystem] 保存失败:', err.message);
+      if (err.message.includes('409')) {
+        showToast('保存冲突，正在重试...');
+        await new Promise(r => setTimeout(r, 500));
+        return saveTagSystemToGitHub(tagSystem);
+      }
+      showToast('保存失败: ' + err.message);
+      return false;
     }
   }
 
@@ -1998,10 +2019,25 @@
     $('tagEditForm').dataset.editId = id;
   }
 
-  function deleteTag(id) {
+  let isSavingTagSystem = false;
+
+  function setTagManagerBusy(busy) {
+    isSavingTagSystem = busy;
+    const buttons = document.querySelectorAll('.tag-manager-actions button, #btnAddNewTag, #btnTagEditSave');
+    buttons.forEach(btn => btn.disabled = busy);
+  }
+
+  async function deleteTag(id) {
+    console.log('[TagSystem] 删除标签:', id);
     if (!confirm('确定删除此标签？已打在日记上的标签不会被删除。')) return;
-    window.__tagSystem.tags = window.__tagSystem.tags.filter(t => t.id !== id);
-    renderTagManager();
+    setTagManagerBusy(true);
+    const tagSystem = JSON.parse(JSON.stringify(window.__tagSystem));
+    const idx = tagSystem.tags.findIndex(t => t.id === id);
+    if (idx < 0) { showToast('标签不存在'); setTagManagerBusy(false); return; }
+    tagSystem.tags.splice(idx, 1);
+    const ok = await saveTagSystemToGitHub(tagSystem);
+    if (ok) renderTagManager();
+    setTagManagerBusy(false);
   }
 
   async function saveTagEdit() {
@@ -2012,23 +2048,23 @@
     if (!name || !/^#[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(name)) {
       showToast('标签名格式错误'); return;
     }
+    setTagManagerBusy(true);
+    const tagSystem = JSON.parse(JSON.stringify(window.__tagSystem));
     const newTag = { id: id || 'tag_' + Date.now(), name, keywords: kws };
     if (rx.length) newTag.regex = rx;
     if (id) {
-      const idx = window.__tagSystem.tags.findIndex(t => t.id === id);
-      if (idx >= 0) window.__tagSystem.tags[idx] = newTag;
+      const idx = tagSystem.tags.findIndex(t => t.id === id);
+      if (idx >= 0) tagSystem.tags[idx] = newTag;
     } else {
-      window.__tagSystem.tags.push(newTag);
+      tagSystem.tags.push(newTag);
     }
-    try {
-      await saveTagSystem(window.__tagSystem);
-      showToast('标签体系已保存');
+    const ok = await saveTagSystemToGitHub(tagSystem);
+    if (ok) {
       $('tagEditForm').style.display = 'none';
       $('tagEditForm').dataset.editId = '';
       renderTagManager();
-    } catch(err) {
-      showToast('保存失败: ' + err.message);
     }
+    setTagManagerBusy(false);
   }
 
   async function testConnection() {
