@@ -787,7 +787,24 @@
     <div class="page active" id="page-write">
       <div class="write-meta">
         <span id="writeDate"></span>
-        <span id="writeModeHint" style="font-size:11px;color:#bbb;">自动保存到 GitHub</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button id="btnFindReplace" style="background:none;border:none;padding:4px 8px;font-size:16px;cursor:pointer;color:#888;" title="查找替换 (Ctrl+H)">🔍</button>
+          <span id="writeModeHint" style="font-size:11px;color:#bbb;">自动保存到 GitHub</span>
+        </div>
+      </div>
+      <div id="findReplaceBox" style="display:none; position:absolute; top:60px; left:10px; right:10px; background:#fff; border:1px solid #e5e5e5; border-radius:12px; padding:16px; box-shadow:0 4px 20px rgba(0,0,0,0.1); z-index:100; max-width:600px; margin:0 auto;">
+        <div style="display:flex; gap:10px; margin-bottom:12px; align-items:center;">
+          <input id="frFind" placeholder="查找" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; outline:none;">
+          <span style="color:#888;">→</span>
+          <input id="frReplace" placeholder="替换为" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; outline:none;">
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-small btn-secondary" id="frFindNext">查找下一个</button>
+          <button class="btn btn-small btn-secondary" id="frReplaceOne">替换</button>
+          <button class="btn btn-small btn-primary" id="frReplaceAll">全部替换</button>
+          <button class="btn btn-small btn-danger" id="frClose" style="margin-left:auto;">关闭</button>
+        </div>
+        <div id="frStatus" style="margin-top:10px; font-size:13px; color:#888; min-height:20px;"></div>
       </div>
       <textarea class="write-area" id="writeArea" placeholder="今天发生了什么..."></textarea>
       <div id="writeTags" style="padding:0 20px 12px;"></div>
@@ -2146,6 +2163,119 @@
     }
   }
 
+  // --- Find & Replace ---
+  let frSearchIndex = -1;
+  let frMatches = [];
+
+  function openFindReplace() {
+    const box = $('findReplaceBox');
+    box.style.display = 'block';
+    const ta = $('writeArea');
+    if (ta.selectionStart !== ta.selectionEnd) {
+      $('frFind').value = ta.value.substring(ta.selectionStart, ta.selectionEnd);
+    } else {
+      $('frFind').value = '';
+    }
+    $('frReplace').value = '';
+    frMatches = [];
+    frSearchIndex = -1;
+    $('frStatus').textContent = '输入查找内容后点击"查找下一个"';
+    setTimeout(() => $('frFind').focus(), 50);
+  }
+
+  function closeFindReplace() {
+    $('findReplaceBox').style.display = 'none';
+    frMatches = [];
+    frSearchIndex = -1;
+    $('writeArea').focus();
+  }
+
+  function findNext() {
+    const text = $('writeArea').value;
+    const search = $('frFind').value;
+    if (!search) { $('frStatus').textContent = '请输入查找内容'; return; }
+
+    if (frMatches.length === 0 || frSearchIndex >= frMatches.length - 1) {
+      frMatches = [];
+      let pos = 0;
+      while ((pos = text.indexOf(search, pos)) !== -1) {
+        frMatches.push({ start: pos, end: pos + search.length });
+        pos += search.length;
+      }
+      frSearchIndex = -1;
+    }
+
+    if (frMatches.length === 0) {
+      $('frStatus').textContent = '未找到 "' + search + '"';
+      return;
+    }
+
+    frSearchIndex++;
+    if (frSearchIndex >= frMatches.length) frSearchIndex = 0;
+
+    const match = frMatches[frSearchIndex];
+    const ta = $('writeArea');
+    ta.focus();
+    ta.setSelectionRange(match.start, match.end);
+    // Scroll into view approximation
+    const lines = text.substring(0, match.start).split('\n').length;
+    const lineHeight = ta.scrollHeight / (text.split('\n').length || 1);
+    ta.scrollTop = Math.max(0, (lines - 1) * lineHeight - ta.clientHeight / 2);
+
+    $('frStatus').textContent = `第 ${frSearchIndex + 1}/${frMatches.length} 处`;
+  }
+
+  function replaceOne() {
+    if (frMatches.length === 0 || frSearchIndex < 0) {
+      $('frStatus').textContent = '请先点击"查找下一个"';
+      return;
+    }
+    const ta = $('writeArea');
+    const text = ta.value;
+    const search = $('frFind').value;
+    const replace = $('frReplace').value;
+    const match = frMatches[frSearchIndex];
+
+    const newText = text.substring(0, match.start) + replace + text.substring(match.end);
+    ta.value = newText;
+
+    const diff = replace.length - search.length;
+    frMatches = frMatches.slice(frSearchIndex + 1).map(m => ({
+      start: m.start + diff,
+      end: m.end + diff
+    }));
+    frSearchIndex = -1;
+
+    $('frStatus').textContent = '已替换，点击"查找下一个"继续';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function replaceAll() {
+    const ta = $('writeArea');
+    const text = ta.value;
+    const search = $('frFind').value;
+    const replace = $('frReplace').value;
+    if (!search) { $('frStatus').textContent = '请输入查找内容'; return; }
+
+    let count = 0;
+    let pos = 0;
+    while ((pos = text.indexOf(search, pos)) !== -1) {
+      count++;
+      pos += search.length;
+    }
+
+    if (count === 0) {
+      $('frStatus').textContent = '未找到 "' + search + '"';
+      return;
+    }
+
+    ta.value = text.split(search).join(replace);
+    frMatches = [];
+    frSearchIndex = -1;
+    $('frStatus').textContent = `已替换 ${count} 处`;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
   // --- Git History ---
   async function loadHistory(fileName) {
     currentHistoryFile = fileName;
@@ -2635,12 +2765,38 @@
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => switchPage(btn.dataset.page));
   });
+  // Find & Replace events
+  if ($('btnFindReplace')) $('btnFindReplace').addEventListener('click', openFindReplace);
+  if ($('frFindNext')) $('frFindNext').addEventListener('click', findNext);
+  if ($('frReplaceOne')) $('frReplaceOne').addEventListener('click', replaceOne);
+  if ($('frReplaceAll')) $('frReplaceAll').addEventListener('click', replaceAll);
+  if ($('frClose')) $('frClose').addEventListener('click', closeFindReplace);
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
       if ($('page-write').classList.contains('active')) {
         saveDiary();
       }
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
+      e.preventDefault();
+      if ($('findReplaceBox').style.display === 'none') {
+        openFindReplace();
+      } else {
+        closeFindReplace();
+      }
+    }
+    if (e.key === 'Escape' && $('findReplaceBox').style.display !== 'none') {
+      closeFindReplace();
+    }
+    // Find/Replace box enter keys
+    if (e.key === 'Enter' && document.activeElement === $('frFind')) {
+      e.preventDefault();
+      findNext();
+    }
+    if (e.key === 'Enter' && document.activeElement === $('frReplace')) {
+      e.preventDefault();
+      replaceOne();
     }
   });
   window.addEventListener('online', updateOnlineStatus);
