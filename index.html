@@ -787,12 +787,12 @@
     <div class="page active" id="page-write">
       <div class="write-meta">
         <span id="writeDate"></span>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <button id="btnFindReplace" style="background:none;border:none;padding:4px 8px;font-size:16px;cursor:pointer;color:#888;" title="查找替换 (Ctrl+H)">🔍</button>
+        <span style="display:flex;gap:8px;align-items:center;">
           <span id="writeModeHint" style="font-size:11px;color:#bbb;">自动保存到 GitHub</span>
-        </div>
+          <button id="btnFindReplace" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;padding:2px 6px;">🔍 替换</button>
+        </span>
       </div>
-      <div id="findReplaceBox" style="display:none; position:absolute; top:60px; left:10px; right:10px; background:#fff; border:1px solid #e5e5e5; border-radius:12px; padding:16px; box-shadow:0 4px 20px rgba(0,0,0,0.1); z-index:100; max-width:600px; margin:0 auto;">
+      <div id="findReplaceBox" style="display:none; position:fixed; top:80px; left:20px; right:20px; max-width:600px; margin:0 auto; background:#fff; border:1px solid #e5e5e5; border-radius:12px; padding:16px; box-shadow:0 4px 20px rgba(0,0,0,0.15); z-index:1000;">
         <div style="display:flex; gap:10px; margin-bottom:12px; align-items:center;">
           <input id="frFind" placeholder="查找" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; outline:none;">
           <span style="color:#888;">→</span>
@@ -2766,11 +2766,26 @@
     btn.addEventListener('click', () => switchPage(btn.dataset.page));
   });
   // Find & Replace events
-  if ($('btnFindReplace')) $('btnFindReplace').addEventListener('click', openFindReplace);
+  if ($('btnFindReplace')) {
+    $('btnFindReplace').addEventListener('click', () => {
+      if ($('findReplaceBox').style.display === 'none') openFindReplace();
+      else closeFindReplace();
+    });
+  }
   if ($('frFindNext')) $('frFindNext').addEventListener('click', findNext);
   if ($('frReplaceOne')) $('frReplaceOne').addEventListener('click', replaceOne);
   if ($('frReplaceAll')) $('frReplaceAll').addEventListener('click', replaceAll);
   if ($('frClose')) $('frClose').addEventListener('click', closeFindReplace);
+  if ($('frFind')) {
+    $('frFind').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); findNext(); }
+    });
+  }
+  if ($('frReplace')) {
+    $('frReplace').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); replaceOne(); }
+    });
+  }
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
@@ -2778,25 +2793,13 @@
         saveDiary();
       }
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'H') {
       e.preventDefault();
-      if ($('findReplaceBox').style.display === 'none') {
-        openFindReplace();
-      } else {
-        closeFindReplace();
-      }
+      if ($('findReplaceBox').style.display === 'none') openFindReplace();
+      else closeFindReplace();
     }
     if (e.key === 'Escape' && $('findReplaceBox').style.display !== 'none') {
       closeFindReplace();
-    }
-    // Find/Replace box enter keys
-    if (e.key === 'Enter' && document.activeElement === $('frFind')) {
-      e.preventDefault();
-      findNext();
-    }
-    if (e.key === 'Enter' && document.activeElement === $('frReplace')) {
-      e.preventDefault();
-      replaceOne();
     }
   });
   window.addEventListener('online', updateOnlineStatus);
