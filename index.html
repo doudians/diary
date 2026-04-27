@@ -1067,6 +1067,13 @@
       console.log('[Unlock] 遮罩层 display 之后:', $('unlockOverlay').style.display);
       showToast('解锁成功');
       switchPage('write');
+      // 解锁后重新加载标签体系（之前因无 Token 加载失败）
+      loadTagSystem().then(ok => {
+        if (ok && $('page-write').classList.contains('active')) {
+          console.log('[TagSystem] 解锁后重新加载成功，刷新标签');
+          renderWriteTags();
+        }
+      });
       console.log('[Unlock] 页面切换完成');
     } catch(e) {
       console.error('[Unlock] 解锁异常:', e.message, e.stack);
@@ -1368,18 +1375,26 @@
   };
 
   async function loadTagSystem() {
+    console.log('[TagSystem] 开始从 GitHub 加载');
     try {
       const detail = await apiGet('/contents/diary-tags.json');
       if (detail && detail.content) {
         const json = base64ToUtf8(detail.content);
         window.__tagSystem = JSON.parse(json);
-        console.log('[Tags] Loaded tag system from repo');
-        return;
+        window.__tagSystemLoaded = true;
+        console.log('[TagSystem] 加载成功:', window.__tagSystem.tags.map(t => t.name));
+        return true;
       }
+      // 404 or empty - file doesn't exist, use defaults
+      console.log('[TagSystem] diary-tags.json 不存在，使用默认标签');
+      window.__tagSystem = JSON.parse(JSON.stringify(DEFAULT_TAG_SYSTEM));
+      window.__tagSystemLoaded = true; // defaults are the established state
+      return false;
     } catch(e) {
-      console.log('[Tags] diary-tags.json not found, using defaults');
+      // Auth error or network issue - don't poison window.__tagSystem with defaults
+      console.error('[TagSystem] 加载失败 (未设置默认值):', e.message);
+      return false;
     }
-    window.__tagSystem = JSON.parse(JSON.stringify(DEFAULT_TAG_SYSTEM));
   }
 
   async function saveTagSystem(data) {
@@ -1762,6 +1777,15 @@
       // Show/hide tag selector based on edit mode
       $('writeTags').style.display = editMode ? 'none' : 'block';
       renderWriteTags();
+      // If tag system not loaded from repo yet, trigger background load + re-render
+      if (!window.__tagSystemLoaded) {
+        loadTagSystem().then(ok => {
+          if (ok && $('page-write').classList.contains('active')) {
+            console.log('[TagSystem] 后台加载完成，重新渲染写日记页标签');
+            renderWriteTags();
+          }
+        });
+      }
       setTimeout(() => $('writeArea').focus(), 100);
     } else if (page === 'detail' || page === 'history' || page === 'version' || page === 'diff') {
       $('saveBar').style.display = 'none';
@@ -1773,8 +1797,16 @@
 
     if (page === 'list') loadDiaryList();
     if (page === 'settings') {
-      if (!window.__tagSystem) loadTagSystem().then(renderTagManager);
-      else renderTagManager();
+      // Always render from current data first, then background reload if needed
+      renderTagManager();
+      if (!window.__tagSystemLoaded) {
+        loadTagSystem().then(ok => {
+          if (ok && $('page-settings').classList.contains('active')) {
+            console.log('[TagSystem] 后台加载完成，重新渲染设置页标签');
+            renderTagManager();
+          }
+        });
+      }
     }
   }
 
