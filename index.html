@@ -474,32 +474,6 @@
     padding: 0 2px;
   }
   .tag-del:hover { opacity: 1; color: #dc2626; }
-  .tag-add {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 1px dashed #ccc;
-    background: transparent;
-    color: #888;
-    font-size: 16px;
-    cursor: pointer;
-    line-height: 1;
-  }
-  .tag-add:hover { border-color: var(--accent); color: var(--accent); }
-  .tag-save {
-    margin-left: auto;
-    padding: 4px 12px;
-    border-radius: 6px;
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .tag-save:disabled { background: #ccc; cursor: not-allowed; }
 
   /* Tag Manager */
   .tag-manager-item {
@@ -833,11 +807,11 @@
           <div class="num" id="dashTotal">0</div>
           <div class="label">篇日记</div>
         </div>
-        <div class="dashboard-card" id="dashCardMonth">
+        <div class="dashboard-card">
           <div class="num" id="dashMonth">0</div>
           <div class="label">本月新增</div>
         </div>
-        <div class="dashboard-card" id="dashCardTop">
+        <div class="dashboard-card">
           <div class="num" id="dashTopTag" style="font-size:16px;">-</div>
           <div class="label">最常用标签</div>
         </div>
@@ -1027,6 +1001,8 @@
 (function() {
   'use strict';
 
+  console.log('[Diary] v: search-fix-2026-04-28');
+
   const LS_KEY = 'minidiary_config_v2';
   const PWD_KEY = 'minidiary_pwd_v2';
   const DIARY_DIR = 'diary';
@@ -1037,9 +1013,6 @@
   const halfWidth = str => str.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
 
   // Unconditional debug logs on every page load
-  console.log('[Diary] 当前 URL hash:', location.hash);
-  console.log('[Diary] 检测到 enc3:', !!location.hash.match(/enc3=/));
-  console.log('[Diary] 内存中 Token 是否存在:', !!window.__token);
   const w = ['周日','周一','周二','周三','周四','周五','周六'];
   // 日记日期以06:00为界，凌晨6点前归属前一天
   function getDiaryDate(d) {
@@ -1075,14 +1048,13 @@
   let writePageTags = []; // tags selected on write page
   let currentDetailFile = null;
   let currentDetailSha = null;
-  let currentDetailTags = []; // deprecated: entry-level tags now
-  let currentDetailFrontmatter = {}; // deprecated: entry-level tags now
   let historyCache = {}; // commit_sha -> content
   let historyCommits = []; // array of commit objects
   let currentHistoryFile = null;
   let currentVersionSha = null;
   window.__tagSystem = null; // loaded from diary-tags.json
   let currentTagFilter = '全部';
+  let currentSearchText = '';
 
   // --- CryptoJS v3: deterministic encryption, no random salt ---
   function deriveKeyIV(password) {
@@ -1119,10 +1091,7 @@
   window.testCrypto = (pwd) => {
     const testObj = JSON.stringify({token:"test123",owner:"test",repo:"test"});
     const enc = encryptConfig(testObj, pwd);
-    console.log("加密结果:", enc);
     const dec = decryptConfig(enc, pwd);
-    console.log("解密结果:", dec);
-    console.log("是否一致:", dec === testObj);
   };
 
   function applyHashConfig() {
@@ -1173,7 +1142,6 @@
   }
 
   async function tryUnlock() {
-    console.log('[Unlock] 函数入口');
     const hash = location.hash;
     // Support new v3 format #enc3=
     let payload = '';
@@ -1185,55 +1153,37 @@
       switchPage('settings');
       return;
     } else {
-      console.log('[Unlock] 无匹配的 hash 格式，hash=', hash.slice(0,30));
       return;
     }
     try { payload = decodeURIComponent(payload); } catch(e) {}
     const rawPwd = $('unlockPwd').value.trim();
     const pwd = halfWidth(rawPwd);
-    console.log('[Unlock] 开始解锁，输入密码长度:', pwd.length);
-    console.log('[Unlock] 即将解密的密文片段:', payload.substring(0,20));
     if (!/^\d{6}$/.test(pwd)) {
       $('unlockStatus').textContent = '请输入6位数字密码';
-      console.log('[Unlock] 密码格式校验失败');
       return;
     }
     try {
-      console.log('[Unlock] 调用 decryptConfig...');
       const decryptedString = decryptConfig(payload, pwd);
-      console.log('[Unlock] 解密原始结果类型:', typeof decryptedString);
-      console.log('[Unlock] 解密结果前50字符:', decryptedString ? decryptedString.substring(0,50) : 'EMPTY');
-      console.log('[Unlock] 是否为有效JSON:', !!(decryptedString && decryptedString.startsWith('{')));
       if (!decryptedString) throw new Error('解密失败，返回空');
       const cfg = JSON.parse(decryptedString);
-      console.log('[Unlock] 解析出的 token 存在:', !!cfg.token);
-      console.log('[Unlock] 解析出的 owner:', cfg.owner);
-      console.log('[Unlock] 解析出的 repo:', cfg.repo);
       if (!cfg.token) throw new Error('无效配置');
       memToken = cfg.token;
       memPassword = pwd;
       config = { owner: cfg.owner || DEFAULT_OWNER, repo: cfg.repo || DEFAULT_REPO };
-      console.log('[Unlock] 内存 Token 已写入:', !!memToken);
-      console.log('[Unlock] 内存 Token 前8位:', memToken ? memToken.substring(0,8) : 'N/A');
       localStorage.setItem(LS_KEY, JSON.stringify(config));
       history.replaceState(null, '', location.pathname + location.search);
       if ($('trustDevice').checked) {
         saveTrustedPassword(pwd);
       }
-      console.log('[Unlock] 即将调用 hideUnlockOverlay / switchPage');
-      console.log('[Unlock] 遮罩层 display 之前:', $('unlockOverlay').style.display);
       hideUnlockOverlay();
-      console.log('[Unlock] 遮罩层 display 之后:', $('unlockOverlay').style.display);
       showToast('解锁成功');
       switchPage('write');
       // 解锁后重新加载标签体系（之前因无 Token 加载失败）
       loadTagSystem().then(ok => {
         if (ok && $('page-write').classList.contains('active')) {
-          console.log('[TagSystem] 解锁后重新加载成功，刷新标签');
           renderWriteTags();
         }
       });
-      console.log('[Unlock] 页面切换完成');
     } catch(e) {
       console.error('[Unlock] 解锁异常:', e.message, e.stack);
       unlockAttempts++;
@@ -1301,19 +1251,7 @@
     localStorage.setItem(PWD_KEY, JSON.stringify({ password, expiresAt }));
   }
 
-  function getTrustedPassword() {
-    try {
-      const pwdData = JSON.parse(localStorage.getItem(PWD_KEY));
-      if (pwdData && pwdData.expiresAt > Date.now()) {
-        return pwdData.password;
-      }
-    } catch(e) {}
-    return null;
-  }
 
-  function clearTrustedPassword() {
-    localStorage.removeItem(PWD_KEY);
-  }
 
   function showToast(msg) {
     const t = $('toast');
@@ -1457,13 +1395,6 @@
     return { time: match[1], tags, raw: line };
   }
 
-  // Strip tags from header, return clean "## HH:MM"
-  function stripTagsFromHeader(line) {
-    const info = parseEntryTags(line);
-    if (!info) return line;
-    return `## ${info.time}`;
-  }
-
   // Parse markdown into entries array { time, tags, body }
   function parseEntries(mdText) {
     const parsed = parseFrontmatter(mdText);
@@ -1548,7 +1479,6 @@
   }
 
   async function loadTagSystem() {
-    console.log('[TagSystem] 开始从 GitHub 加载');
     try {
       const detail = await apiGet('/contents/diary-tags.json');
       if (detail && detail.content) {
@@ -1556,7 +1486,6 @@
         window.__tagSystem = JSON.parse(json);
         window.__tagSystemLoaded = true;
         const loadedNames = window.__tagSystem.tags.map(t => t.name);
-        console.log('[TagSystem] 加载成功:', loadedNames);
         // Check order consistency
         const expectedOrder = TAG_ORDER.filter(t => loadedNames.includes(t));
         const actualOrder = loadedNames.filter(t => TAG_ORDER.includes(t));
@@ -1567,7 +1496,6 @@
         return true;
       }
       // 404 or empty - file doesn't exist, use defaults
-      console.log('[TagSystem] diary-tags.json 不存在，使用默认标签');
       window.__tagSystem = JSON.parse(JSON.stringify(DEFAULT_TAG_SYSTEM));
       window.__tagSystemLoaded = true; // defaults are the established state
       return false;
@@ -1580,14 +1508,12 @@
 
   // Unified tag system save with 409 retry
   async function saveTagSystemToGitHub(tagSystem) {
-    console.log('[TagSystem] 开始保存到 GitHub，标签数:', tagSystem.tags.length);
     // 1. Read latest sha
     let sha = null;
     try {
       const existing = await apiGet('/contents/diary-tags.json');
       if (existing && existing.sha) sha = existing.sha;
     } catch(e) {
-      console.log('[TagSystem] 读取 sha 失败（可能文件不存在）:', e.message);
     }
     // 2. Build request
     const content = utf8ToBase64(JSON.stringify(tagSystem, null, 2));
@@ -1600,7 +1526,6 @@
     try {
       await apiPut('/contents/diary-tags.json', body);
       window.__tagSystem = tagSystem;
-      console.log('[TagSystem] 保存成功，当前标签:', tagSystem.tags.map(t => t.name));
       return true;
     } catch(err) {
       console.error('[TagSystem] 保存失败:', err.message);
@@ -1615,7 +1540,6 @@
   }
 
   async function syncTagOrderToGitHub() {
-    console.log('[TagSystem] 同步标签顺序到仓库');
     const tagSystem = JSON.parse(JSON.stringify(window.__tagSystem));
     tagSystem.tags = sortTagsByPriority(tagSystem.tags);
     const ok = await saveTagSystemToGitHub(tagSystem);
@@ -1678,6 +1602,7 @@
         const idx = diaryCache.findIndex(d => d.name === fileName);
         if (idx >= 0) {
           diaryCache[idx].preview = text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '');
+          diaryCache[idx].content = content;
         }
         $('writeArea').value = '';
         editMode = null;
@@ -1720,7 +1645,8 @@
           dateLabel: fmtDateShort(currentDate),
           weekday: w[currentDate.getDay()],
           preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : ''),
-          tags: writePageTags.length > 0 ? [...writePageTags] : []
+          tags: writePageTags.length > 0 ? [...writePageTags] : [],
+          content
         };
         const existingIndex = diaryCache.findIndex(d => d.name === fileName);
         if (existingIndex >= 0) {
@@ -1756,9 +1682,13 @@
   async function loadDiaryList() {
     if (!memToken) { showToast('请先设置 Token 或解锁'); switchPage('settings'); return; }
 
+    const localIndex = loadFileIndex();
+
     // Render cache instantly if available
     if (diaryCache.length > 0) {
       renderDiaryList(diaryCache, '已缓存，后台同步中...');
+    } else if (localIndex.length > 0) {
+      renderDiaryList(localIndex, '本地缓存，后台同步中...');
     } else {
       $('diaryList').innerHTML = '';
       $('listEmpty').style.display = 'none';
@@ -1786,6 +1716,8 @@
         return;
       }
 
+      const localMap = new Map(localIndex.map(d => [d.name, d]));
+
       // Build fresh cache from API
       diaryCache = [];
       for (const f of mdFiles) {
@@ -1798,13 +1730,21 @@
           wday = w[d.getDay()];
         }
 
+        const cached = localMap.get(f.name);
+        if (cached && cached.sha === f.sha) {
+          diaryCache.push(cached);
+          continue;
+        }
+
         let preview = '...';
         let tags = [];
+        let content = '';
         try {
           const detail = await apiGet(`/contents/${DIARY_DIR}/${f.name}`);
           if (detail && detail.content) {
-            const full = base64ToUtf8(detail.content);
-            const parsed = parseEntries(full);
+            const fullText = base64ToUtf8(detail.content);
+            content = fullText;
+            const parsed = parseEntries(fullText);
             // Build preview from all entry bodies
             let allBody = '';
             for (const entry of parsed.entries) {
@@ -1821,13 +1761,16 @@
           }
         } catch(e) {}
 
-        diaryCache.push({ name: f.name, dateLabel, weekday: wday, preview, tags });
+        diaryCache.push({ name: f.name, dateLabel, weekday: wday, preview, tags, sha: f.sha, content });
       }
 
+      saveFileIndex(diaryCache);
       renderDiaryList(diaryCache, `共 ${mdFiles.length} 篇日记（来自 GitHub）`);
     } catch (err) {
-      console.error(err);
-      if (diaryCache.length === 0) {
+      if (diaryCache.length === 0 && localIndex.length > 0) {
+        diaryCache = localIndex;
+        renderDiaryList(diaryCache, '离线缓存');
+      } else if (diaryCache.length === 0) {
         $('diaryList').innerHTML = '';
         $('listEmpty').style.display = 'block';
       }
@@ -1838,6 +1781,27 @@
     }
   }
 
+  function extractHighlight(text, keyword) {
+    const idx = text.toLowerCase().indexOf(keyword.toLowerCase());
+    if (idx < 0) return text.slice(0, 60) + (text.length > 60 ? '...' : '');
+    const start = Math.max(0, idx - 20);
+    const end = Math.min(text.length, idx + keyword.length + 20);
+    let snippet = text.slice(start, end);
+    if (start > 0) snippet = '...' + snippet;
+    if (end < text.length) snippet = snippet + '...';
+    return snippet;
+  }
+
+  function highlightKeyword(snippet, keyword) {
+    if (!keyword) return escapeHtml(snippet);
+    const re = new RegExp('(' + escapeRegExp(keyword) + ')', 'gi');
+    return escapeHtml(snippet).replace(re, '<mark style="background:#fef08a;padding:0 2px;">$1</mark>');
+  }
+
+  function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   function renderDiaryList(items, statusText) {
     $('diaryList').innerHTML = '';
     $('listEmpty').style.display = 'none';
@@ -1846,7 +1810,12 @@
       const li = document.createElement('li');
       li.className = 'diary-item';
       const tagsHtml = renderTags(item.tags, 3);
-      li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${item.preview}</div>`;
+      const displayPreview = currentSearchText && item.content
+        ? highlightKeyword(extractHighlight(item.content, currentSearchText), currentSearchText)
+        : escapeHtml(item.preview);
+      // eslint-disable-next-line no-console
+      console.log('渲染:', item.name, '搜索词:', currentSearchText, '使用高亮?', !!(currentSearchText && item.content));
+      li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${displayPreview}</div>`;
       li.addEventListener('click', e => {
         // If clicked on a tag pill, trigger filter instead of detail
         if (e.target.classList.contains('tag-pill')) {
@@ -1863,6 +1832,7 @@
 
   function applyDiaryFilters() {
     const keyword = $('listSearch').value.trim().toLowerCase();
+    currentSearchText = keyword;
     let items = [...diaryCache];
     // Tag filter
     if (currentTagFilter !== '全部') {
@@ -1874,7 +1844,8 @@
         item.name.toLowerCase().includes(keyword) ||
         item.dateLabel.toLowerCase().includes(keyword) ||
         item.weekday.toLowerCase().includes(keyword) ||
-        item.preview.toLowerCase().includes(keyword)
+        item.preview.toLowerCase().includes(keyword) ||
+        (item.content && item.content.toLowerCase().includes(keyword))
       );
     }
     // Update UI
@@ -2128,7 +2099,6 @@
       if (!window.__tagSystemLoaded) {
         loadTagSystem().then(ok => {
           if (ok && $('page-write').classList.contains('active')) {
-            console.log('[TagSystem] 后台加载完成，重新渲染写日记页标签');
             renderWriteTags();
           }
         });
@@ -2155,7 +2125,6 @@
       if (!window.__tagSystemLoaded) {
         loadTagSystem().then(ok => {
           if (ok && $('page-settings').classList.contains('active')) {
-            console.log('[TagSystem] 后台加载完成，重新渲染设置页标签');
             renderTagManager();
           }
         });
@@ -2474,7 +2443,6 @@
   }
 
   async function deleteTag(id) {
-    console.log('[TagSystem] 删除标签:', id);
     if (!confirm('确定删除此标签？已打在日记上的标签不会被删除。')) return;
     setTagManagerBusy(true);
     const tagSystem = JSON.parse(JSON.stringify(window.__tagSystem));
@@ -2519,10 +2487,6 @@
     const owner = $('settingOwner').value.trim() || DEFAULT_OWNER;
     const repo = $('settingRepo').value.trim() || DEFAULT_REPO;
 
-    console.log('[testConnection] input token length=', tokenFromInput.length, 'prefix=', tokenFromInput ? tokenFromInput.slice(0, 10) : 'EMPTY');
-    console.log('[testConnection] resolved token source=', tokenFromInput ? 'input' : (pendingMigrateToken ? 'pendingMigrate' : (memToken ? 'memToken' : 'NONE')));
-    console.log('[testConnection] owner=', owner, 'repo=', repo);
-    console.log('[testConnection] memToken before=', memToken ? 'SET' : 'NULL', 'config before=', JSON.stringify(config));
 
     if (!token || !owner || !repo) { showToast('请填写完整信息'); return; }
 
@@ -2530,7 +2494,6 @@
     const tmpCfg = config;
     memToken = token;
     config = { owner, repo };
-    console.log('[testConnection] memToken after assign=', memToken ? 'SET' : 'NULL');
     try {
       await ensureDiaryDir();
       const testPath = '/diary/.diary-test';
@@ -2548,7 +2511,6 @@
       }
       showToast('连接成功 — 读写权限正常');
     } catch (err) {
-      console.log('[testConnection] ERROR:', err.message, err.stack);
       let msg = err.message || '';
       if (msg.includes('401')) msg = 'Token 无效';
       else if (msg.includes('403')) msg = 'Token 无权限，请检查是否授权本仓库 Contents 读写';
@@ -2557,7 +2519,6 @@
     } finally {
       memToken = tmpToken;
       config = tmpCfg;
-      console.log('[testConnection] restored memToken=', memToken ? 'SET' : 'NULL');
     }
   }
 
@@ -2707,7 +2668,6 @@
   }
   if ($('btnUnlock')) {
     $('btnUnlock').addEventListener('click', tryUnlock);
-    console.log('[Diary] btnUnlock 事件已绑定');
   } else {
     console.error('[Diary] btnUnlock 元素未找到!');
   }
@@ -2835,6 +2795,25 @@
       $('tagEditForm').style.display = 'none';
       $('tagEditForm').dataset.editId = '';
     });
+  }
+
+  const INDEX_VERSION = 2;
+
+  function saveFileIndex(list) {
+    localStorage.setItem('diary_index_v2', JSON.stringify({
+      version: INDEX_VERSION,
+      list: list.map(d => ({
+        name: d.name, sha: d.sha, dateLabel: d.dateLabel, weekday: d.weekday, preview: d.preview, tags: d.tags, content: d.content
+      }))
+    }));
+  }
+
+  function loadFileIndex() {
+    try {
+      const raw = JSON.parse(localStorage.getItem('diary_index_v2') || 'null');
+      if (!raw || raw.version !== INDEX_VERSION) return [];
+      return raw.list || [];
+    } catch(e) { return []; }
   }
 
   // Init
