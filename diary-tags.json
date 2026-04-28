@@ -2,6 +2,15 @@
   "version": 1,
   "tags": [
     {
+      "id": "tag_1777300573022",
+      "name": "#感悟",
+      "keywords": [
+        "感悟",
+        "成长",
+        "思考"
+      ]
+    },
+    {
       "id": "work",
       "name": "#工作",
       "keywords": [
@@ -37,6 +46,19 @@
       ]
     },
     {
+      "id": "tech",
+      "name": "#技术",
+      "keywords": [
+        "代码",
+        "API",
+        "GitHub",
+        "Docker",
+        "模型",
+        "AI",
+        "部署"
+      ]
+    },
+    {
       "id": "life",
       "name": "#生活",
       "keywords": [
@@ -62,19 +84,6 @@
       ]
     },
     {
-      "id": "tech",
-      "name": "#技术",
-      "keywords": [
-        "代码",
-        "API",
-        "GitHub",
-        "Docker",
-        "模型",
-        "AI",
-        "部署"
-      ]
-    },
-    {
       "id": "social",
       "name": "#人际",
       "keywords": [
@@ -84,15 +93,6 @@
         "关系",
         "人脉",
         "人情"
-      ]
-    },
-    {
-      "id": "tag_1777300573022",
-      "name": "#感悟",
-      "keywords": [
-        "感悟",
-        "成长",
-        "思考"
       ]
     }
   ]
