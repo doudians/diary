@@ -1055,6 +1055,9 @@
   window.__tagSystem = null; // loaded from diary-tags.json
   let currentTagFilter = '全部';
   let currentSearchText = '';
+  let isLoadingList = false;
+  let isRendering = false;
+  let searchDebounceTimer = null;
 
   // --- CryptoJS v3: deterministic encryption, no random salt ---
   function deriveKeyIV(password) {
@@ -1498,7 +1501,6 @@
           if (memToken) {
             await saveTagSystemToGitHub(window.__tagSystem);
           }
-          console.log('[TagSystem] 标签顺序已自动对齐');
         }
         return true;
       }
@@ -1686,15 +1688,17 @@
     }
   }
 
-  async function loadDiaryList() {
+  async function loadDiaryList(forceRefresh = false) {
+    if (isLoadingList) return;
+    if (!forceRefresh && diaryCache.length > 0) {
+      renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇`);
+      return;
+    }
     if (!memToken) { showToast('请先设置 Token 或解锁'); switchPage('settings'); return; }
 
     const localIndex = loadFileIndex();
 
-    // Render cache instantly if available
-    if (diaryCache.length > 0) {
-      renderDiaryList(diaryCache, '已缓存，后台同步中...');
-    } else if (localIndex.length > 0) {
+    if (localIndex.length > 0) {
       renderDiaryList(localIndex, '本地缓存，后台同步中...');
     } else {
       $('diaryList').innerHTML = '';
@@ -1702,6 +1706,7 @@
       $('listStatus').textContent = '正在从 GitHub 加载...';
     }
 
+    isLoadingList = true;
     try {
       const files = await apiGet(`/contents/${DIARY_DIR}`);
       if (!files || !Array.isArray(files) || files.length === 0) {
@@ -1785,6 +1790,8 @@
       let msg = err.message || '';
       if (msg.includes('404')) msg = '目录不存在，请先写一篇日记';
       showToast('加载失败: ' + msg);
+    } finally {
+      isLoadingList = false;
     }
   }
 
@@ -1810,30 +1817,34 @@
   }
 
   function renderDiaryList(items, statusText) {
-    $('diaryList').innerHTML = '';
-    $('listEmpty').style.display = 'none';
-    $('listStatus').textContent = statusText;
-    for (const item of items) {
-      const li = document.createElement('li');
-      li.className = 'diary-item';
-      const tagsHtml = renderTags(item.tags, 3);
-      const displayPreview = currentSearchText && item.content
-        ? highlightKeyword(extractHighlight(item.content, currentSearchText), currentSearchText)
-        : escapeHtml(item.preview);
-      // eslint-disable-next-line no-console
-      console.log('渲染:', item.name, '搜索词:', currentSearchText, '使用高亮?', !!(currentSearchText && item.content));
-      li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${displayPreview}</div>`;
-      li.addEventListener('click', e => {
-        // If clicked on a tag pill, trigger filter instead of detail
-        if (e.target.classList.contains('tag-pill')) {
-          e.stopPropagation();
-          currentTagFilter = e.target.textContent.trim();
-          switchPage('list');
-          return;
-        }
-        showDetail(item.name);
-      });
-      $('diaryList').appendChild(li);
+    if (isRendering) return;
+    isRendering = true;
+    try {
+      $('diaryList').innerHTML = '';
+      $('listEmpty').style.display = 'none';
+      $('listStatus').textContent = statusText;
+      for (const item of items) {
+        const li = document.createElement('li');
+        li.className = 'diary-item';
+        const tagsHtml = renderTags(item.tags, 3);
+        const displayPreview = currentSearchText && item.content
+          ? highlightKeyword(extractHighlight(item.content, currentSearchText), currentSearchText)
+          : escapeHtml(item.preview);
+        li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${displayPreview}</div>`;
+        li.addEventListener('click', e => {
+          // If clicked on a tag pill, trigger filter instead of detail
+          if (e.target.classList.contains('tag-pill')) {
+            e.stopPropagation();
+            currentTagFilter = e.target.textContent.trim();
+            switchPage('list');
+            return;
+          }
+          showDetail(item.name);
+        });
+        $('diaryList').appendChild(li);
+      }
+    } finally {
+      isRendering = false;
     }
   }
 
@@ -2120,7 +2131,11 @@
     }
 
     if (page === 'list') {
-      loadDiaryList();
+      if (diaryCache.length > 0) {
+        renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇`);
+      } else {
+        loadDiaryList();
+      }
       renderTagFilter();
     }
     if (page === 'dashboard') {
@@ -2581,7 +2596,6 @@
       showToast('请牢记您的6位同步密码，链接丢失或泄露后没有密码无法访问');
       pendingMigrateToken = null;
     } catch(e) {
-      console.error('[Diary] 加密失败:', e);
       showToast('加密失败: ' + e.message);
     }
   }
@@ -2676,7 +2690,6 @@
   if ($('btnUnlock')) {
     $('btnUnlock').addEventListener('click', tryUnlock);
   } else {
-    console.error('[Diary] btnUnlock 元素未找到!');
   }
   if ($('unlockPwd')) {
     $('unlockPwd').addEventListener('keydown', e => {
@@ -2720,7 +2733,10 @@
     $('btnBackHistory2').addEventListener('click', () => switchPage('history'));
   }
   if ($('listSearch')) {
-    $('listSearch').addEventListener('input', filterDiaryList);
+    $('listSearch').addEventListener('input', () => {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(filterDiaryList, 200);
+    });
   }
   if ($('searchClear')) {
     $('searchClear').addEventListener('click', () => {
