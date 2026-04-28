@@ -1479,6 +1479,9 @@
   }
 
   async function loadTagSystem() {
+    if (!config || !config.owner || !config.repo) {
+      return false;
+    }
     try {
       const detail = await apiGet('/contents/diary-tags.json');
       if (detail && detail.content) {
@@ -1486,12 +1489,16 @@
         window.__tagSystem = JSON.parse(json);
         window.__tagSystemLoaded = true;
         const loadedNames = window.__tagSystem.tags.map(t => t.name);
-        // Check order consistency
+        // Auto-fix order consistency
         const expectedOrder = TAG_ORDER.filter(t => loadedNames.includes(t));
         const actualOrder = loadedNames.filter(t => TAG_ORDER.includes(t));
         const orderMismatch = expectedOrder.some((t, i) => t !== actualOrder[i]);
         if (orderMismatch) {
-          console.warn('[TagSystem] 仓库标签顺序与预期不符，建议点击"同步顺序到仓库"');
+          window.__tagSystem.tags = sortTagsByPriority(window.__tagSystem.tags);
+          if (memToken) {
+            await saveTagSystemToGitHub(window.__tagSystem);
+          }
+          console.log('[TagSystem] 标签顺序已自动对齐');
         }
         return true;
       }
@@ -2818,7 +2825,7 @@
 
   // Init
   updateOnlineStatus();
-  loadTagSystem().catch(() => {}); // preload tag system in background
+  if (memToken) loadTagSystem().catch(() => {}); // preload tag system in background
   const hasCfgHash = applyHashConfig();
   const hasEncHash = applyEncConfig();
   loadConfig();
