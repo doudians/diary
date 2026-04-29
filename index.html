@@ -1660,7 +1660,7 @@
       if (idx >= 0) list[idx] = entry;
       else list.push(entry);
       saveLocalDiaries(list);
-      diaryCache = list.filter(d => !d.deleted);
+      diaryCache = mapLocalToCache(list);
 
       $('writeArea').value = '';
       writePageTags = [];
@@ -1676,11 +1676,35 @@
     }
   }
 
+  function mapLocalToCache(localList) {
+    return localList.filter(d => !d.deleted).map(d => {
+      const dateMatch = d.name.match(/(\d{4})-(\d{2})-(\d{2})/);
+      let dateLabel = d.name.replace('.md','');
+      let weekday = '';
+      if (dateMatch) {
+        const dt = new Date(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3]);
+        dateLabel = fmtDateShort(dt);
+        weekday = w[dt.getDay()];
+      }
+      return {
+        name: d.name,
+        dateLabel,
+        weekday,
+        preview: d.preview || (d.content ? d.content.slice(0, 60).replace(/\n/g, ' ') + (d.content.length > 60 ? '...' : '') : ''),
+        tags: d.tags || [],
+        content: d.content || '',
+        sha: d.sha || null,
+        synced: d.synced,
+        updatedAt: d.updatedAt
+      };
+    });
+  }
+
   async function loadDiaryList(forceRefresh = false) {
     if (isLoadingList) return;
     isLoadingList = true;
     try {
-      diaryCache = loadLocalDiaries().filter(d => !d.deleted);
+      diaryCache = mapLocalToCache(loadLocalDiaries());
       if (diaryCache.length > 0) {
         const unsyncedCount = diaryCache.filter(d => !d.synced).length;
         const status = unsyncedCount > 0
@@ -2094,7 +2118,7 @@
       } catch(e) {}
     }
     saveLocalDiaries(list);
-    diaryCache = list.filter(d => !d.deleted);
+    diaryCache = mapLocalToCache(list);
     $('btnSyncUp').disabled = false;
     $('btnSyncUp').textContent = '☁️ 同步到 GitHub';
     $('syncStatus').textContent = `同步完成：成功 ${success} 篇，失败 ${fail} 篇`;
@@ -2150,7 +2174,7 @@
         }
       }
       saveLocalDiaries(localList);
-      diaryCache = localList.filter(d => !d.deleted);
+      diaryCache = mapLocalToCache(localList);
       renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇（${downloaded} 篇来自云端）`);
       showToast(`拉取完成，新增/更新 ${downloaded} 篇`);
     } catch(e) {
@@ -2214,11 +2238,7 @@
     }
 
     if (page === 'list') {
-      if (diaryCache.length > 0) {
-        renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇`);
-      } else {
-        loadDiaryList();
-      }
+      applyDiaryFilters();
       renderTagFilter();
       renderSyncBar();
     }
@@ -2737,7 +2757,7 @@
       list[idx].deleted = true;
       saveLocalDiaries(list);
     }
-    diaryCache = list.filter(d => !d.deleted);
+    diaryCache = mapLocalToCache(list);
     currentDetailFile = null;
     currentDetailSha = null;
     showToast('已标记删除（同步后从云端移除）');
@@ -2946,8 +2966,8 @@
   // Init
   updateOnlineStatus();
   const migrated = migrateOldCache();
-  if (migrated) diaryCache = migrated.filter(d => !d.deleted);
-  else diaryCache = loadLocalDiaries().filter(d => !d.deleted);
+  if (migrated) diaryCache = mapLocalToCache(migrated);
+  else diaryCache = mapLocalToCache(loadLocalDiaries());
   if (memToken) loadTagSystem().catch(() => {});
   const hasCfgHash = applyHashConfig();
   const hasEncHash = applyEncConfig();
