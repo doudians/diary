@@ -790,6 +790,11 @@
         <input type="text" id="listSearch" placeholder="搜索日记内容..." autocomplete="off">
         <span class="search-clear" id="searchClear">✕</span>
       </div>
+      <div style="display:flex;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);" id="syncBarList">
+        <button class="btn btn-primary btn-small" id="btnSyncUp">☁️ 同步到 GitHub</button>
+        <button class="btn btn-secondary btn-small" id="btnSyncDown">⬇️ 拉取云端</button>
+        <span id="syncStatus" style="font-size:12px;color:#888;display:flex;align-items:center;">本地模式</span>
+      </div>
       <div class="tag-filter-bar" id="tagFilterBar"></div>
       <div id="listStatus" style="font-size:12px;color:#888;margin-bottom:10px;"></div>
       <ul class="diary-list" id="diaryList"></ul>
@@ -1592,137 +1597,80 @@
   async function saveDiary() {
     const text = $('writeArea').value.trim();
     if (!text) { showToast('内容不能为空'); return; }
-    if (!memToken) { showToast('请先设置 Token 或解锁'); switchPage('settings'); return; }
 
     setSaveState(true);
-    setSyncBadge('pending', '同步中...');
 
     try {
-      await ensureDiaryDir();
+      const fileName = editMode ? editMode.fileName : `${fmtFileDate(currentDate)}.md`;
 
-      if (editMode) {
-        // Edit mode: overwrite entire file, update frontmatter tags
-        const fileName = editMode.fileName;
-        const path = `/${DIARY_DIR}/${fileName}`;
-
-        // Re-fetch latest sha to prevent 409
-        let latestSha = editMode.sha;
-        try {
-          const latest = await apiGet(`/contents/${DIARY_DIR}/${fileName}`);
-          if (latest && latest.sha) latestSha = latest.sha;
-        } catch(e) {}
-
-        let finalContent = text;
-        if (writePageTags.length > 0) {
-          const fm = `---\ntags:\n` + writePageTags.map(t => `- '${t}'`).join('\n') + `\n---\n\n`;
-          if (finalContent.startsWith('---')) {
-            finalContent = finalContent.replace(/^---[\s\S]*?---\n*/, fm);
-          } else {
-            finalContent = fm + finalContent;
-          }
-        } else if (finalContent.startsWith('---')) {
-          const parsed = parseFrontmatter(finalContent);
-          if (parsed.frontmatterRaw) {
-            const lines = parsed.frontmatterRaw.split('\n');
-            const remaining = [];
-            let skippingTags = false;
-            for (const line of lines) {
-              const t = line.trim();
-              if (t.startsWith('tags:')) { skippingTags = true; continue; }
-              if (skippingTags && t.startsWith('-')) continue;
-              skippingTags = false;
-              remaining.push(line);
-            }
-            if (remaining.length === 0 || remaining.every(l => !l.trim())) {
-              finalContent = parsed.body;
-            } else {
-              finalContent = `---\n${remaining.join('\n')}\n---\n\n${parsed.body}`;
-            }
-          }
-        }
-
-        await apiPut(`/contents${path}`, {
-          message: `diary: edit ${fileName}`,
-          content: utf8ToBase64(finalContent),
-          sha: latestSha
-        });
-        // Update cache
-        const idx = diaryCache.findIndex(d => d.name === fileName);
-        if (idx >= 0) {
-          diaryCache[idx].preview = text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '');
-          diaryCache[idx].content = finalContent;
-        }
-        $('writeArea').value = '';
-        writePageTags = [];
-        editMode = null;
-        updateWriteModeUI();
-        showToast('修改已保存');
-        setSyncBadge('', '已同步');
-        setTimeout(hideSyncBadge, 3000);
-      } else {
-        // New mode: append to today's file with entry-level tags
-        const fileName = `${fmtFileDate(currentDate)}.md`;
-        const path = `/${DIARY_DIR}/${fileName}`;
-        const timeStr = fmtTime(new Date());
-        const tagStr = writePageTags.length > 0 ? ' ' + writePageTags.join(' ') : '';
-        const newEntry = `## ${timeStr}${tagStr}\n${text}\n\n`;
-        let content = `# ${fmtFileDate(currentDate)}\n\n${newEntry}`;
-        let sha = null;
-        let frontmatterRaw = '';
-        const existing = await apiGet(`/contents${path}`);
-        if (existing && existing.content) {
-          sha = existing.sha;
-          const existingText = base64ToUtf8(existing.content);
-          const parsed = parseFrontmatter(existingText);
-          if (parsed.frontmatterRaw) {
-            frontmatterRaw = parsed.frontmatterRaw;
-            content = `---\n${parsed.frontmatterRaw}\n---\n${parsed.body.trimEnd()}\n\n${newEntry}`;
-          } else {
-            content = existingText.trimEnd() + '\n\n' + newEntry;
-          }
-        }
-
-        await apiPut(`/contents${path}`, {
-          message: `diary: ${fileName}`,
-          content: utf8ToBase64(content),
-          ...(sha ? { sha } : {})
-        });
-
-        // Update cache so list shows instantly without re-fetching
-        const cacheEntry = {
-          name: fileName,
-          dateLabel: fmtDateShort(currentDate),
-          weekday: w[currentDate.getDay()],
-          preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : ''),
-          tags: writePageTags.length > 0 ? [...writePageTags] : [],
-          content
-        };
-        const existingIndex = diaryCache.findIndex(d => d.name === fileName);
-        if (existingIndex >= 0) {
-          // Merge tags with existing cache entry's tags
-          const existingTags = diaryCache[existingIndex].tags || [];
-          cacheEntry.tags = [...new Set([...existingTags, ...writePageTags])];
-          diaryCache[existingIndex] = cacheEntry;
+      let finalContent = text;
+      if (writePageTags.length > 0) {
+        const fm = `---\ntags:\n` + writePageTags.map(t => `- '${t}'`).join('\n') + `\n---\n\n`;
+        if (finalContent.startsWith('---')) {
+          finalContent = finalContent.replace(/^---[\s\S]*?---\n*/, fm);
         } else {
-          diaryCache.unshift(cacheEntry);
+          finalContent = fm + finalContent;
         }
-
-        $('writeArea').value = '';
-        writePageTags = [];
-        renderWriteTags();
-        showToast('已保存到 GitHub');
-        setSyncBadge('', '已同步');
-        setTimeout(hideSyncBadge, 3000);
+      } else if (finalContent.startsWith('---')) {
+        const parsed = parseFrontmatter(finalContent);
+        if (parsed.frontmatterRaw) {
+          const lines = parsed.frontmatterRaw.split('\n');
+          const remaining = [];
+          let skippingTags = false;
+          for (const line of lines) {
+            const t = line.trim();
+            if (t.startsWith('tags:')) { skippingTags = true; continue; }
+            if (skippingTags && t.startsWith('-')) continue;
+            skippingTags = false;
+            remaining.push(line);
+          }
+          if (remaining.length === 0 || remaining.every(l => !l.trim())) {
+            finalContent = parsed.body;
+          } else {
+            finalContent = `---\n${remaining.join('\n')}\n---\n\n${parsed.body}`;
+          }
+        }
       }
+
+      const dateMatch = fileName.match(/(\d{4})-(\d{2})-(\d{2})/);
+      let dateLabel = fileName.replace('.md','');
+      let wday = '';
+      if (dateMatch) {
+        const d = new Date(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3]);
+        dateLabel = fmtDateShort(d);
+        wday = w[d.getDay()];
+      }
+
+      const allTags = new Set(writePageTags);
+      for (const t of extractFreeTags(finalContent)) allTags.add(t);
+
+      const entry = {
+        name: fileName,
+        content: finalContent,
+        updatedAt: Date.now(),
+        tags: Array.from(allTags),
+        preview: text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : ''),
+        sha: editMode ? editMode.sha : null,
+        synced: false,
+        deleted: false
+      };
+
+      const list = loadLocalDiaries();
+      const idx = list.findIndex(d => d.name === fileName);
+      if (idx >= 0) list[idx] = entry;
+      else list.push(entry);
+      saveLocalDiaries(list);
+      diaryCache = list.filter(d => !d.deleted);
+
+      $('writeArea').value = '';
+      writePageTags = [];
+      editMode = null;
+      updateWriteModeUI();
+      renderWriteTags();
+      showToast('已保存到本地');
+      updateSaveBarStatus();
     } catch (err) {
-      console.error(err);
-      let msg = err.message || '未知错误';
-      if (msg.includes('401')) msg = 'Token 无效或已过期';
-      else if (msg.includes('403')) msg = 'Token 无权限（请检查是否授权本仓库 Contents 读写）';
-      else if (msg.includes('404')) msg = '仓库不存在';
-      else if (msg.includes('422')) msg = '请求格式错误';
-      showToast('保存失败: ' + msg);
-      setSyncBadge('offline', '同步失败');
+      showToast('保存失败: ' + err.message);
     } finally {
       setSaveState(false);
     }
@@ -1730,112 +1678,20 @@
 
   async function loadDiaryList(forceRefresh = false) {
     if (isLoadingList) return;
-    if (!forceRefresh && diaryCache.length > 0) {
-      renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇`);
-      return;
-    }
-    if (!memToken) { showToast('请先设置 Token 或解锁'); switchPage('settings'); return; }
-
-    const localIndex = loadFileIndex();
-
-    if (localIndex.length > 0) {
-      renderDiaryList(localIndex, '本地缓存，后台同步中...');
-    } else {
-      $('diaryList').innerHTML = '';
-      $('listEmpty').style.display = 'none';
-      $('listStatus').textContent = '正在从 GitHub 加载...';
-    }
-
     isLoadingList = true;
     try {
-      const files = await apiGet(`/contents/${DIARY_DIR}`);
-      if (!files || !Array.isArray(files) || files.length === 0) {
-        diaryCache = [];
+      diaryCache = loadLocalDiaries().filter(d => !d.deleted);
+      if (diaryCache.length > 0) {
+        const unsyncedCount = diaryCache.filter(d => !d.synced).length;
+        const status = unsyncedCount > 0
+          ? `共 ${diaryCache.length} 篇（${unsyncedCount} 篇未同步）`
+          : `共 ${diaryCache.length} 篇`;
+        renderDiaryList(diaryCache, status);
+      } else {
         $('diaryList').innerHTML = '';
         $('listEmpty').style.display = 'block';
-        $('listStatus').textContent = '';
-        return;
+        $('listStatus').textContent = '暂无日记，去写一篇吧';
       }
-
-      const mdFiles = files
-        .filter(f => f.name.endsWith('.md'))
-        .sort((a, b) => b.name.localeCompare(a.name));
-
-      if (mdFiles.length === 0) {
-        diaryCache = [];
-        $('listEmpty').style.display = 'block';
-        $('listStatus').textContent = '';
-        return;
-      }
-
-      const localMap = new Map(localIndex.map(d => [d.name, d]));
-
-      // Build fresh cache from API
-      diaryCache = [];
-      for (const f of mdFiles) {
-        const dateMatch = f.name.match(/(\d{4})-(\d{2})-(\d{2})/);
-        let dateLabel = f.name.replace('.md','');
-        let wday = '';
-        if (dateMatch) {
-          const d = new Date(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3]);
-          dateLabel = fmtDateShort(d);
-          wday = w[d.getDay()];
-        }
-
-        const cached = localMap.get(f.name);
-        if (cached && cached.sha === f.sha) {
-          diaryCache.push(cached);
-          continue;
-        }
-
-        let preview = '...';
-        let tags = [];
-        let content = '';
-        try {
-          const detail = await apiGet(`/contents/${DIARY_DIR}/${f.name}`);
-          if (detail && detail.content) {
-            const fullText = base64ToUtf8(detail.content);
-            content = fullText;
-            const parsed = parseEntries(fullText);
-            // Build preview from all entry bodies
-            let allBody = '';
-            for (const entry of parsed.entries) {
-              allBody += entry.bodyLines.join('\n') + '\n';
-            }
-            preview = allBody.trim().replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}(\s+#[^\s#]+)*\s*/g, ' ').trim();
-            preview = preview.slice(0, 60).replace(/\n/g, ' ') + (preview.length > 60 ? '...' : '');
-            // Collect all unique tags: frontmatter + entry-level + free
-            const allTags = new Set();
-            if (parsed.frontmatter.tags) {
-              for (const t of parsed.frontmatter.tags) allTags.add(t);
-            }
-            for (const entry of parsed.entries) {
-              for (const t of entry.tags) allTags.add(t);
-            }
-            for (const t of extractFreeTags(fullText)) {
-              allTags.add(t);
-            }
-            tags = Array.from(allTags);
-          }
-        } catch(e) {}
-
-        diaryCache.push({ name: f.name, dateLabel, weekday: wday, preview, tags, sha: f.sha, content });
-      }
-
-      saveFileIndex(diaryCache);
-      renderDiaryList(diaryCache, `共 ${mdFiles.length} 篇日记（来自 GitHub）`);
-    } catch (err) {
-      if (diaryCache.length === 0 && localIndex.length > 0) {
-        diaryCache = localIndex;
-        renderDiaryList(diaryCache, '离线缓存');
-      } else if (diaryCache.length === 0) {
-        $('diaryList').innerHTML = '';
-        $('listEmpty').style.display = 'block';
-      }
-      $('listStatus').textContent = '加载失败';
-      let msg = err.message || '';
-      if (msg.includes('404')) msg = '目录不存在，请先写一篇日记';
-      showToast('加载失败: ' + msg);
     } finally {
       isLoadingList = false;
     }
@@ -1876,7 +1732,10 @@
         const displayPreview = currentSearchText && item.content
           ? highlightKeyword(extractHighlight(item.content, currentSearchText), currentSearchText)
           : escapeHtml(item.preview);
-        li.innerHTML = `<div class="date">${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${displayPreview}</div>`;
+        const syncDot = item.synced === false ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b;margin-right:6px;vertical-align:middle;"></span>'
+          : (item.sha === null ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#cbd5e1;margin-right:6px;vertical-align:middle;"></span>'
+          : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;margin-right:6px;vertical-align:middle;"></span>');
+        li.innerHTML = `<div class="date">${syncDot}${item.dateLabel}<span class="weekday">${item.weekday}</span></div>${tagsHtml}<div class="preview">${displayPreview}</div>`;
         li.addEventListener('click', e => {
           // If clicked on a tag pill, trigger filter instead of detail
           if (e.target.classList.contains('tag-pill')) {
@@ -2091,6 +1950,25 @@
     });
   }
 
+  function renderSyncBar() {
+    const bar = $('syncBarList');
+    if (!bar) return;
+    const list = loadLocalDiaries();
+    const unsynced = list.filter(d => !d.synced && !d.deleted).length;
+    bar.style.display = 'flex';
+    $('syncStatus').textContent = unsynced > 0 ? `${unsynced} 篇未同步` : '全部已同步';
+  }
+
+  function updateSaveBarStatus() {
+    const hint = $('writeModeHint');
+    if (!hint) return;
+    if (!memToken) {
+      hint.textContent = '⚪ 仅本地保存（未配置 GitHub）';
+    } else {
+      hint.textContent = '🟠 本地草稿（点击列表页同步）';
+    }
+  }
+
   // --- Dashboard ---
   const DASHBOARD_COLORS = ['#2563eb','#16a34a','#dc2626','#ca8a04','#7c3aed','#0891b2','#db2777','#65a30d'];
 
@@ -2169,6 +2047,121 @@
     });
   }
 
+  async function syncToGitHub() {
+    if (!memToken) {
+      showToast('请先设置 GitHub Token 或解锁');
+      switchPage('settings');
+      return;
+    }
+    const list = loadLocalDiaries();
+    const unsynced = list.filter(d => !d.synced && !d.deleted);
+    const toDelete = list.filter(d => d.deleted);
+    if (unsynced.length === 0 && toDelete.length === 0) {
+      showToast('所有日记已同步');
+      return;
+    }
+    $('btnSyncUp').disabled = true;
+    $('btnSyncUp').textContent = '同步中...';
+    let success = 0, fail = 0;
+    for (const entry of unsynced) {
+      try {
+        const path = `/contents/${DIARY_DIR}/${entry.name}`;
+        const body = { message: `diary: ${entry.name}`, content: utf8ToBase64(entry.content) };
+        let sha = null;
+        try {
+          const existing = await apiGet(`/contents/${DIARY_DIR}/${entry.name}`);
+          if (existing && existing.sha) sha = existing.sha;
+        } catch(e) {}
+        if (sha) body.sha = sha;
+        const res = await apiPut(path, body);
+        entry.sha = res.content.sha;
+        entry.synced = true;
+        success++;
+        $('syncStatus').textContent = `正在同步 ${success}/${unsynced.length}...`;
+      } catch(e) {
+        fail++;
+      }
+    }
+    for (const entry of toDelete) {
+      try {
+        if (entry.sha) {
+          await fetch(getApiBase() + `/contents/${DIARY_DIR}/${entry.name}`, {
+            method: 'DELETE',
+            headers: getHeaders(),
+            body: JSON.stringify({ message: `diary: delete ${entry.name}`, sha: entry.sha })
+          });
+        }
+      } catch(e) {}
+    }
+    saveLocalDiaries(list);
+    diaryCache = list.filter(d => !d.deleted);
+    $('btnSyncUp').disabled = false;
+    $('btnSyncUp').textContent = '☁️ 同步到 GitHub';
+    $('syncStatus').textContent = `同步完成：成功 ${success} 篇，失败 ${fail} 篇`;
+    showToast('同步完成');
+    renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇`);
+  }
+
+  async function syncFromGitHub() {
+    if (!memToken) {
+      showToast('请先设置 GitHub Token 或解锁');
+      switchPage('settings');
+      return;
+    }
+    $('btnSyncDown').disabled = true;
+    $('btnSyncDown').textContent = '拉取中...';
+    try {
+      const files = await apiGet(`/contents/${DIARY_DIR}`);
+      if (!files || !Array.isArray(files)) {
+        showToast('云端暂无日记');
+        return;
+      }
+      const mdFiles = files.filter(f => f.name.endsWith('.md'));
+      const localList = loadLocalDiaries();
+      let downloaded = 0;
+      for (const f of mdFiles) {
+        const local = localList.find(d => d.name === f.name);
+        if (!local || local.sha !== f.sha) {
+          const detail = await apiGet(`/contents/${DIARY_DIR}/${f.name}`);
+          const content = base64ToUtf8(detail.content);
+          const parsed = parseEntries(content);
+          const allTags = new Set();
+          if (parsed.frontmatter.tags) {
+            for (const t of parsed.frontmatter.tags) allTags.add(t);
+          }
+          for (const entry of parsed.entries) {
+            for (const t of entry.tags) allTags.add(t);
+          }
+          for (const t of extractFreeTags(content)) allTags.add(t);
+          const entry = {
+            name: f.name,
+            content,
+            updatedAt: Date.now(),
+            tags: Array.from(allTags),
+            preview: parsed.body ? parsed.body.trim().slice(0, 60).replace(/\n/g, ' ') + (parsed.body.length > 60 ? '...' : '') : '',
+            sha: f.sha,
+            synced: true,
+            deleted: false
+          };
+          const idx = localList.findIndex(d => d.name === f.name);
+          if (idx >= 0) localList[idx] = entry;
+          else localList.push(entry);
+          downloaded++;
+        }
+      }
+      saveLocalDiaries(localList);
+      diaryCache = localList.filter(d => !d.deleted);
+      renderDiaryList(diaryCache, `共 ${diaryCache.length} 篇（${downloaded} 篇来自云端）`);
+      showToast(`拉取完成，新增/更新 ${downloaded} 篇`);
+    } catch(e) {
+      showToast('拉取失败: ' + e.message);
+    } finally {
+      $('btnSyncDown').disabled = false;
+      $('btnSyncDown').textContent = '⬇️ 拉取云端';
+    }
+  }
+
+
   function switchPage(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -2227,6 +2220,7 @@
         loadDiaryList();
       }
       renderTagFilter();
+      renderSyncBar();
     }
     if (page === 'dashboard') {
       renderDashboard();
@@ -2735,29 +2729,19 @@
   }
 
   async function deleteDiary() {
-    if (!currentDetailFile || !currentDetailSha) return;
-    if (!confirm('确定要删除这篇日记吗？此操作不可恢复。')) return;
-    try {
-      const res = await fetch(getApiBase() + `/contents/${DIARY_DIR}/${currentDetailFile}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-        body: JSON.stringify({
-          message: `diary: delete ${currentDetailFile}`,
-          sha: currentDetailSha
-        })
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`HTTP ${res.status}: ${txt}`);
-      }
-      diaryCache = diaryCache.filter(d => d.name !== currentDetailFile);
-      currentDetailFile = null;
-      currentDetailSha = null;
-      showToast('已删除');
-      switchPage('list');
-    } catch (err) {
-      showToast('删除失败: ' + err.message);
+    if (!currentDetailFile) return;
+    if (!confirm('确定要删除这篇日记吗？删除后需同步才会从云端移除。')) return;
+    const list = loadLocalDiaries();
+    const idx = list.findIndex(d => d.name === currentDetailFile);
+    if (idx >= 0) {
+      list[idx].deleted = true;
+      saveLocalDiaries(list);
     }
+    diaryCache = list.filter(d => !d.deleted);
+    currentDetailFile = null;
+    currentDetailSha = null;
+    showToast('已标记删除（同步后从云端移除）');
+    switchPage('list');
   }
 
   // Events
@@ -2778,6 +2762,8 @@
     if (currentDetailFile) loadHistory(currentDetailFile);
   });
   $('btnDelete').addEventListener('click', deleteDiary);
+  if ($('btnSyncUp')) $('btnSyncUp').addEventListener('click', syncToGitHub);
+  if ($('btnSyncDown')) $('btnSyncDown').addEventListener('click', syncFromGitHub);
   $('btnClearData').addEventListener('click', () => {
     if (confirm('确定要清除所有本地保存的 Token 和设置吗？')) {
       clearConfig();
@@ -2924,28 +2910,45 @@
     });
   }
 
-  const INDEX_VERSION = 2;
+  const LOCAL_KEY = 'diary_local_v1';
 
-  function saveFileIndex(list) {
-    localStorage.setItem('diary_index_v2', JSON.stringify({
-      version: INDEX_VERSION,
-      list: list.map(d => ({
-        name: d.name, sha: d.sha, dateLabel: d.dateLabel, weekday: d.weekday, preview: d.preview, tags: d.tags, content: d.content
-      }))
-    }));
+  function loadLocalDiaries() {
+    try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]'); }
+    catch(e) { return []; }
   }
 
-  function loadFileIndex() {
+  function saveLocalDiaries(list) {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(list));
+  }
+
+  function migrateOldCache() {
     try {
-      const raw = JSON.parse(localStorage.getItem('diary_index_v2') || 'null');
-      if (!raw || raw.version !== INDEX_VERSION) return [];
-      return raw.list || [];
-    } catch(e) { return []; }
+      const oldV2 = JSON.parse(localStorage.getItem('diary_index_v2') || 'null');
+      if (oldV2 && oldV2.list && oldV2.list.length > 0) {
+        const migrated = oldV2.list.map(d => ({
+          name: d.name,
+          content: d.content || '',
+          updatedAt: Date.now(),
+          tags: d.tags || [],
+          preview: d.preview || '',
+          sha: d.sha || null,
+          synced: true,
+          deleted: false
+        }));
+        saveLocalDiaries(migrated);
+        localStorage.removeItem('diary_index_v2');
+        return migrated;
+      }
+    } catch(e) {}
+    return null;
   }
 
   // Init
   updateOnlineStatus();
-  if (memToken) loadTagSystem().catch(() => {}); // preload tag system in background
+  const migrated = migrateOldCache();
+  if (migrated) diaryCache = migrated.filter(d => !d.deleted);
+  else diaryCache = loadLocalDiaries().filter(d => !d.deleted);
+  if (memToken) loadTagSystem().catch(() => {});
   const hasCfgHash = applyHashConfig();
   const hasEncHash = applyEncConfig();
   loadConfig();
@@ -2953,10 +2956,8 @@
     // old plain text: settings page shown inside applyHashConfig
   } else if (hasEncHash) {
     // encrypted: unlock overlay shown, wait for password
-  } else if (memToken) {
-    switchPage('write');
   } else {
-    switchPage('settings');
+    switchPage('write');
   }
 })();
 </script>
