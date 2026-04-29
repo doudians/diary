@@ -1602,33 +1602,55 @@
 
     try {
       const fileName = editMode ? editMode.fileName : `${fmtFileDate(currentDate)}.md`;
+      const dateStr = fmtFileDate(currentDate);
+      const timeStr = fmtTime(new Date());
+      const tagStr = writePageTags.length > 0 ? ' ' + writePageTags.join(' ') : '';
+      const newEntry = `## ${timeStr}${tagStr}\n${text}\n\n`;
 
-      let finalContent = text;
-      if (writePageTags.length > 0) {
-        const fm = `---\ntags:\n` + writePageTags.map(t => `- '${t}'`).join('\n') + `\n---\n\n`;
-        if (finalContent.startsWith('---')) {
-          finalContent = finalContent.replace(/^---[\s\S]*?---\n*/, fm);
-        } else {
-          finalContent = fm + finalContent;
-        }
-      } else if (finalContent.startsWith('---')) {
-        const parsed = parseFrontmatter(finalContent);
-        if (parsed.frontmatterRaw) {
-          const lines = parsed.frontmatterRaw.split('\n');
-          const remaining = [];
-          let skippingTags = false;
-          for (const line of lines) {
-            const t = line.trim();
-            if (t.startsWith('tags:')) { skippingTags = true; continue; }
-            if (skippingTags && t.startsWith('-')) continue;
-            skippingTags = false;
-            remaining.push(line);
-          }
-          if (remaining.length === 0 || remaining.every(l => !l.trim())) {
-            finalContent = parsed.body;
+      let finalContent;
+      if (editMode) {
+        // Edit mode: overwrite entire file
+        finalContent = text;
+        if (writePageTags.length > 0) {
+          const fm = `---\ntags:\n` + writePageTags.map(t => `- '${t}'`).join('\n') + `\n---\n\n`;
+          if (finalContent.startsWith('---')) {
+            finalContent = finalContent.replace(/^---[\s\S]*?---\n*/, fm);
           } else {
-            finalContent = `---\n${remaining.join('\n')}\n---\n\n${parsed.body}`;
+            finalContent = fm + finalContent;
           }
+        } else if (finalContent.startsWith('---')) {
+          const parsed = parseFrontmatter(finalContent);
+          if (parsed.frontmatterRaw) {
+            const lines = parsed.frontmatterRaw.split('\n');
+            const remaining = [];
+            let skippingTags = false;
+            for (const line of lines) {
+              const t = line.trim();
+              if (t.startsWith('tags:')) { skippingTags = true; continue; }
+              if (skippingTags && t.startsWith('-')) continue;
+              skippingTags = false;
+              remaining.push(line);
+            }
+            if (remaining.length === 0 || remaining.every(l => !l.trim())) {
+              finalContent = parsed.body;
+            } else {
+              finalContent = `---\n${remaining.join('\n')}\n---\n\n${parsed.body}`;
+            }
+          }
+        }
+      } else {
+        // New mode: append to existing file or create new
+        const list = loadLocalDiaries();
+        const existing = list.find(d => d.name === fileName);
+        if (existing && existing.content) {
+          const newMarkdown = `# ${dateStr}\n\n${newEntry}`;
+          finalContent = mergeDiaryContent(existing.content, newMarkdown, fileName);
+        } else {
+          let fm = '';
+          if (writePageTags.length > 0) {
+            fm = `---\ntags:\n` + writePageTags.map(t => `- '${t}'`).join('\n') + `\n---\n\n`;
+          }
+          finalContent = (fm ? fm : '') + `# ${dateStr}\n\n${newEntry}`;
         }
       }
 
@@ -1675,31 +1697,6 @@
       setSaveState(false);
     }
   }
-
-  function mapLocalToCache(localList) {
-    return localList.filter(d => !d.deleted).map(d => {
-      const dateMatch = d.name.match(/(\d{4})-(\d{2})-(\d{2})/);
-      let dateLabel = d.name.replace('.md','');
-      let weekday = '';
-      if (dateMatch) {
-        const dt = new Date(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3]);
-        dateLabel = fmtDateShort(dt);
-        weekday = w[dt.getDay()];
-      }
-      return {
-        name: d.name,
-        dateLabel,
-        weekday,
-        preview: d.preview || (d.content ? d.content.slice(0, 60).replace(/\n/g, ' ') + (d.content.length > 60 ? '...' : '') : ''),
-        tags: d.tags || [],
-        content: d.content || '',
-        sha: d.sha || null,
-        synced: d.synced,
-        updatedAt: d.updatedAt
-      };
-    });
-  }
-
   async function loadDiaryList(forceRefresh = false) {
     if (isLoadingList) return;
     isLoadingList = true;
@@ -2071,6 +2068,41 @@
     });
   }
 
+  function mergeDiaryContent(cloudText, localText, fileName) {
+    const extractEntries = (text) => {
+      const entries = [];
+      const lines = text.split('\n');
+      let currentEntry = null;
+      for (const line of lines) {
+        const timeMatch = line.match(/^##\s+(\d{2}:\d{2})/);
+        if (timeMatch) {
+          if (currentEntry) entries.push(currentEntry);
+          currentEntry = { time: timeMatch[1], lines: [line], key: line.trim() };
+        } else if (currentEntry) {
+          currentEntry.lines.push(line);
+        }
+      }
+      if (currentEntry) entries.push(currentEntry);
+      return entries;
+    };
+    const cloudEntries = extractEntries(cloudText);
+    const localEntries = extractEntries(localText);
+    const entryMap = new Map();
+    for (const e of cloudEntries) entryMap.set(e.key, e);
+    for (const e of localEntries) entryMap.set(e.key, e);
+    const sorted = [...entryMap.values()].sort((a, b) => a.time.localeCompare(b.time));
+    let frontmatter = '';
+    const localFm = localText.match(/^---[\s\S]*?---\n*/);
+    if (localFm) frontmatter = localFm[0];
+    else {
+      const cloudFm = cloudText.match(/^---[\s\S]*?---\n*/);
+      if (cloudFm) frontmatter = cloudFm[0];
+    }
+    const body = sorted.map(e => e.lines.join('\n').trim()).join('\n\n');
+    const dateTitle = `# ${fileName.replace('.md', '')}`;
+    return (frontmatter ? frontmatter.trimEnd() + '\n\n' : '') + `${dateTitle}\n\n${body}\n`;
+  }
+
   async function syncToGitHub() {
     if (!memToken) {
       showToast('请先设置 GitHub Token 或解锁');
@@ -2087,17 +2119,25 @@
     $('btnSyncUp').disabled = true;
     $('btnSyncUp').textContent = '同步中...';
     let success = 0, fail = 0;
+    let mergeCount = 0;
     for (const entry of unsynced) {
       try {
-        const path = `/contents/${DIARY_DIR}/${entry.name}`;
-        const body = { message: `diary: ${entry.name}`, content: utf8ToBase64(entry.content) };
-        let sha = null;
+        let cloudContent = '';
+        let cloudSha = null;
         try {
-          const existing = await apiGet(`/contents/${DIARY_DIR}/${entry.name}`);
-          if (existing && existing.sha) sha = existing.sha;
+          const cloudFile = await apiGet(`/contents/${DIARY_DIR}/${entry.name}`);
+          if (cloudFile && cloudFile.content) {
+            cloudContent = base64ToUtf8(cloudFile.content);
+            cloudSha = cloudFile.sha;
+          }
         } catch(e) {}
-        if (sha) body.sha = sha;
+        const mergedContent = mergeDiaryContent(cloudContent, entry.content, entry.name);
+        if (cloudContent && mergedContent !== entry.content) mergeCount++;
+        const path = `/contents/${DIARY_DIR}/${entry.name}`;
+        const body = { message: `diary: ${entry.name}`, content: utf8ToBase64(mergedContent) };
+        if (cloudSha) body.sha = cloudSha;
         const res = await apiPut(path, body);
+        entry.content = mergedContent;
         entry.sha = res.content.sha;
         entry.synced = true;
         success++;
