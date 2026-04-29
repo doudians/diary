@@ -1595,25 +1595,59 @@
       await ensureDiaryDir();
 
       if (editMode) {
-        // Edit mode: overwrite entire file, preserve frontmatter as-is
+        // Edit mode: overwrite entire file, update frontmatter tags
         const fileName = editMode.fileName;
         const path = `/${DIARY_DIR}/${fileName}`;
-        let content = text;
-        if (editMode.frontmatterRaw) {
-          content = `---\n${editMode.frontmatterRaw}\n---\n${text}`;
+
+        // Re-fetch latest sha to prevent 409
+        let latestSha = editMode.sha;
+        try {
+          const latest = await apiGet(`/contents/${DIARY_DIR}/${fileName}`);
+          if (latest && latest.sha) latestSha = latest.sha;
+        } catch(e) {}
+
+        let finalContent = text;
+        if (writePageTags.length > 0) {
+          const fm = `---\ntags:\n` + writePageTags.map(t => `- '${t}'`).join('\n') + `\n---\n\n`;
+          if (finalContent.startsWith('---')) {
+            finalContent = finalContent.replace(/^---[\s\S]*?---\n*/, fm);
+          } else {
+            finalContent = fm + finalContent;
+          }
+        } else if (finalContent.startsWith('---')) {
+          const parsed = parseFrontmatter(finalContent);
+          if (parsed.frontmatterRaw) {
+            const lines = parsed.frontmatterRaw.split('\n');
+            const remaining = [];
+            let skippingTags = false;
+            for (const line of lines) {
+              const t = line.trim();
+              if (t.startsWith('tags:')) { skippingTags = true; continue; }
+              if (skippingTags && t.startsWith('-')) continue;
+              skippingTags = false;
+              remaining.push(line);
+            }
+            if (remaining.length === 0 || remaining.every(l => !l.trim())) {
+              finalContent = parsed.body;
+            } else {
+              finalContent = `---\n${remaining.join('\n')}\n---\n\n${parsed.body}`;
+            }
+          }
         }
+
         await apiPut(`/contents${path}`, {
           message: `diary: edit ${fileName}`,
-          content: utf8ToBase64(content),
-          sha: editMode.sha
+          content: utf8ToBase64(finalContent),
+          sha: latestSha
         });
         // Update cache
         const idx = diaryCache.findIndex(d => d.name === fileName);
         if (idx >= 0) {
           diaryCache[idx].preview = text.slice(0, 60).replace(/\n/g, ' ') + (text.length > 60 ? '...' : '');
-          diaryCache[idx].content = content;
+          diaryCache[idx].content = finalContent;
         }
         $('writeArea').value = '';
+        writePageTags = [];
         editMode = null;
         updateWriteModeUI();
         showToast('修改已保存');
@@ -2110,8 +2144,7 @@
         $('writeArea').value = '';
         writePageTags = [];
       }
-      // Show/hide tag selector based on edit mode
-      $('writeTags').style.display = editMode ? 'none' : 'block';
+      $('writeTags').style.display = 'block';
       renderWriteTags();
       // If tag system not loaded from repo yet, trigger background load + re-render
       if (!window.__tagSystemLoaded) {
@@ -2621,7 +2654,21 @@
       const parsed = parseFrontmatter(md);
       editMode = { fileName: currentDetailFile, sha: detail.sha, frontmatterRaw: parsed.frontmatterRaw };
       $('writeArea').value = parsed.body;
-      writePageTags = []; // Edit mode does not use write page tags
+
+      // Load existing tags for editing
+      let existingTags = [];
+      if (parsed.frontmatter.tags && Array.isArray(parsed.frontmatter.tags)) {
+        existingTags = parsed.frontmatter.tags;
+      } else {
+        const entryParsed = parseEntries(md);
+        const tagSet = new Set();
+        for (const entry of entryParsed.entries) {
+          for (const t of entry.tags) tagSet.add(t);
+        }
+        existingTags = Array.from(tagSet);
+      }
+      writePageTags = existingTags;
+
       updateWriteModeUI();
       switchPage('write');
       showToast('已进入编辑模式');
