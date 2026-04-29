@@ -1424,6 +1424,12 @@
   }
 
   // Render entries to HTML for detail page
+  function extractFreeTags(text) {
+    if (!text) return [];
+    const matches = text.matchAll(/#[\w\u4e00-\u9fa5]{1,19}/g);
+    return [...new Set([...matches].map(m => m[0]))];
+  }
+
   function renderEntriesHtml(parsed) {
     if (parsed.entries.length === 0) {
       return marked.parse(parsed.body || '');
@@ -1798,10 +1804,16 @@
             }
             preview = allBody.trim().replace(/^#\s+\d{4}-\d{2}-\d{2}\s*/, '').replace(/##\s+\d{2}:\d{2}(\s+#[^\s#]+)*\s*/g, ' ').trim();
             preview = preview.slice(0, 60).replace(/\n/g, ' ') + (preview.length > 60 ? '...' : '');
-            // Collect all unique entry-level tags
+            // Collect all unique tags: frontmatter + entry-level + free
             const allTags = new Set();
+            if (parsed.frontmatter.tags) {
+              for (const t of parsed.frontmatter.tags) allTags.add(t);
+            }
             for (const entry of parsed.entries) {
               for (const t of entry.tags) allTags.add(t);
+            }
+            for (const t of extractFreeTags(fullText)) {
+              allTags.add(t);
             }
             tags = Array.from(allTags);
           }
@@ -1946,10 +1958,16 @@
       $('detailBody').innerHTML = renderEntriesHtml(parsed);
       currentDetailFile = fileName;
       currentDetailSha = detail.sha;
-      // Show all unique tags at top for quick overview
+      // Show all unique tags: frontmatter + entry-level + free
       const allTags = new Set();
+      if (parsed.frontmatter.tags) {
+        for (const t of parsed.frontmatter.tags) allTags.add(t);
+      }
       for (const entry of parsed.entries) {
         for (const t of entry.tags) allTags.add(t);
+      }
+      for (const t of extractFreeTags(md)) {
+        allTags.add(t);
       }
       $('detailTags').innerHTML = allTags.size > 0
         ? `<div class="tag-row">${Array.from(allTags).map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('')}</div>`
@@ -1964,6 +1982,7 @@
     const container = $('writeTags');
     const text = $('writeArea').value;
     const recs = recommendTags(text);
+    const freeRecs = extractFreeTags(text).filter(t => !writePageTags.includes(t));
     const sortedTags = (window.__tagSystem && window.__tagSystem.tags) ? sortTagsByPriority(window.__tagSystem.tags) : [];
     const allTags = sortedTags.map(t => t.name);
     let html = '';
@@ -1973,6 +1992,15 @@
       html += `<div class="tag-section-label">💡 推荐标签（点击添加）</div>`;
       html += `<div class="tag-selector">`;
       for (const tag of newRecs) {
+        html += `<span class="tag-option tag-recommend" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
+      }
+      html += `</div>`;
+    }
+
+    if (freeRecs.length > 0) {
+      html += `<div class="tag-section-label">✨ 自由标签（点击添加）</div>`;
+      html += `<div class="tag-selector">`;
+      for (const tag of freeRecs) {
         html += `<span class="tag-option tag-recommend" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`;
       }
       html += `</div>`;
@@ -1997,6 +2025,8 @@
       html += `</div>`;
     }
 
+    html += `<div class="tag-selector" style="margin-top:8px;"><input type="text" id="customTagInput" placeholder="输入 #标签" style="width:80px;font-size:12px;border:1px solid #ddd;border-radius:14px;padding:4px 10px;" onkeydown="if(event.key==='Enter'){event.preventDefault();}"></div>`;
+
     container.innerHTML = html;
     container.querySelectorAll('.tag-option').forEach(el => {
       el.addEventListener('click', e => {
@@ -2015,15 +2045,35 @@
         }
       });
     });
+
+    const input = $('customTagInput');
+    if (input) {
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          const val = input.value.trim();
+          if (/^#[\w\u4e00-\u9fa5]+$/.test(val)) {
+            if (!writePageTags.includes(val)) writePageTags.push(val);
+            renderWriteTags();
+          } else {
+            showToast('标签格式为 #中文或#英文');
+          }
+        }
+      });
+    }
   }
 
   // --- Tag Filter on List Page ---
   function renderTagFilter() {
     const bar = $('tagFilterBar');
     if (!bar) return;
-    const allTagNames = (window.__tagSystem && window.__tagSystem.tags)
+    const predefinedNames = (window.__tagSystem && window.__tagSystem.tags)
       ? window.__tagSystem.tags.map(t => t.name)
       : [];
+    // Also include active free tag if filtering one
+    const allTagNames = [...predefinedNames];
+    if (currentTagFilter !== '全部' && !allTagNames.includes(currentTagFilter)) {
+      allTagNames.push(currentTagFilter);
+    }
     let html = '';
     // "全部" pill
     html += `<span class="tag-filter-pill ${currentTagFilter === '全部' ? 'active' : ''}" data-tag="全部">全部</span>`;
@@ -2059,17 +2109,24 @@
     Object.entries(tagStats).forEach(([tag, count]) => {
       if (count > topCount) { topTag = tag; topCount = count; }
     });
-    // Tag details
+    // Tag details: predefined first, then free tags sorted by count
     const sortedTags = (window.__tagSystem && window.__tagSystem.tags)
       ? sortTagsByPriority(window.__tagSystem.tags)
       : [];
-    const tagDetails = sortedTags.map((t, i) => {
-      const count = tagStats[t.name] || 0;
-      const recent = diaryCache.find(d => (d.tags || []).includes(t.name));
+    const predefinedNames = new Set(sortedTags.map(t => t.name));
+    const freeTagNames = Object.keys(tagStats).filter(t => !predefinedNames.has(t)).sort((a, b) => tagStats[b] - tagStats[a]);
+    const allTagNames = [...sortedTags.map(t => t.name), ...freeTagNames];
+    const tagDetails = allTagNames.map((name, i) => {
+      const count = tagStats[name] || 0;
+      const recent = diaryCache.find(d => (d.tags || []).includes(name));
+      const isPredefined = predefinedNames.has(name);
+      const color = isPredefined
+        ? DASHBOARD_COLORS[sortedTags.findIndex(t => t.name === name) % DASHBOARD_COLORS.length]
+        : '#64748b';
       return {
-        name: t.name,
+        name,
         count,
-        color: DASHBOARD_COLORS[i % DASHBOARD_COLORS.length],
+        color,
         recentDate: recent ? recent.dateLabel : '-'
       };
     });
