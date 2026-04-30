@@ -1185,6 +1185,10 @@
       }
       hideUnlockOverlay();
       showToast('解锁成功');
+      // Load local data after unlock
+      const migrated = migrateOldCache();
+      if (migrated) diaryCache = mapLocalToCache(migrated);
+      else diaryCache = mapLocalToCache(loadLocalDiaries());
       switchPage('write');
       // 解锁后重新加载标签体系（之前因无 Token 加载失败）
       loadTagSystem().then(ok => {
@@ -3005,20 +3009,28 @@
 
   // Init
   updateOnlineStatus();
+
+  // Step 1: Check encrypted bookmark (highest priority)
+  const hasEncHash = applyEncConfig();
+  if (hasEncHash) {
+    // Unlock overlay shown, wait for password. Do NOT proceed until unlocked.
+    return;
+  }
+
+  // Step 2: Check old plain-text config
+  const hasCfgHash = applyHashConfig();
+  if (hasCfgHash) {
+    // Settings page shown inside applyHashConfig
+    return;
+  }
+
+  // Step 3: Load local data (local-first architecture)
+  loadConfig();
   const migrated = migrateOldCache();
   if (migrated) diaryCache = mapLocalToCache(migrated);
   else diaryCache = mapLocalToCache(loadLocalDiaries());
   if (memToken) loadTagSystem().catch(() => {});
-  const hasCfgHash = applyHashConfig();
-  const hasEncHash = applyEncConfig();
-  loadConfig();
-  if (hasCfgHash) {
-    // old plain text: settings page shown inside applyHashConfig
-  } else if (hasEncHash) {
-    // encrypted: unlock overlay shown, wait for password
-  } else {
-    switchPage('write');
-  }
+  switchPage('write');
 })();
 </script>
 </body>
