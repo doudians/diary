@@ -1598,6 +1598,31 @@
     if (!repo || !repo.id) throw new Error('仓库不存在或 Token 无权访问');
   }
 
+  function mapLocalToCache(localList) {
+    if (!Array.isArray(localList)) return [];
+    return localList.filter(d => !d.deleted).map(d => {
+      const dateMatch = d.name.match(/(\d{4})-(\d{2})-(\d{2})/);
+      let dateLabel = d.name.replace('.md','');
+      let weekday = '';
+      if (dateMatch) {
+        const dt = new Date(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3]);
+        dateLabel = fmtDateShort(dt);
+        weekday = w[dt.getDay()];
+      }
+      return {
+        name: d.name,
+        dateLabel,
+        weekday,
+        preview: d.preview || (d.content ? d.content.replace(/^---[\s\S]*?---\n*/, '').replace(/^#\s+\d{4}-\d{2}-\d{2}\s*\n*/, '').replace(/##\s+\d{2}:\d{2}\s*/g, ' ').trim().slice(0, 60).replace(/\n/g, ' ') + (d.content.length > 60 ? '...' : '') : ''),
+        tags: d.tags || [],
+        content: d.content || '',
+        synced: !!d.synced,
+        sha: d.sha || null,
+        updatedAt: d.updatedAt || 0
+      };
+    }).sort((a, b) => b.name.localeCompare(a.name));
+  }
+
   async function saveDiary() {
     const text = $('writeArea').value.trim();
     if (!text) { showToast('内容不能为空'); return; }
